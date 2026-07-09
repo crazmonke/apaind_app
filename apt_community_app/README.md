@@ -32,7 +32,7 @@ flutter run -d android
 ## 알림(FCM) 동작 요약
 
 - 앱 시작 시 Firebase 초기화 후 FCM 서비스 초기화
-- 설정 화면의 푸시/댓글/공지/이벤트 토글과 FCM 토픽 구독 상태가 동기화됨
+- 설정 화면의 푸시/댓글/공지/새 글 토글과 FCM 토픽 구독 상태가 동기화됨
 - iOS foreground 알림 표시 옵션 활성화
 - 푸시 OFF 시 로컬 알림 정리 + FCM 토큰 삭제
 
@@ -44,6 +44,8 @@ flutter run -d android
 - 서버 역할: 댓글/공지/새글 발생 시 FCM 발송, 토큰 저장/갱신, 사용자별 대상자 결정
 
 현재 앱은 로그인 후 서버로 FCM 토큰을 전달하는 전제(`/api/v1/fcm-token`)로 설계되어 있습니다.
+
+서버 토픽은 `comment`, `notice`, `new_post`를 사용합니다. 앱은 payload의 `type`, `notificationType`, `post_id`, `url`, `deep_link`, `link` 순서로 목표 이동 경로를 해석합니다.
 
 ## 참고
 

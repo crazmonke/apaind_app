@@ -116,6 +116,8 @@ flutter run -d android
 
 - 앱 로그인 시 서버에 FCM 토큰 전송: `POST /api/v1/fcm-token`
 - 서버는 사용자 ID와 토큰을 저장하고, 이벤트 발생 시 Firebase Admin SDK로 발송
+- 서버 토픽은 `comment`, `notice`, `new_post`를 사용
+- payload는 `type`, `notificationType`, `post_id`, `url`, `deep_link`, `link` 순서로 해석
 - payload 예시:
 
 ```json

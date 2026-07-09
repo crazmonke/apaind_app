@@ -1,15 +1,16 @@
 import 'dart:convert';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // 백그라운드 메시지 수신 시 isolate에서 호출된다.
   if (Firebase.apps.isEmpty) {
     try {
       await Firebase.initializeApp();
@@ -24,22 +25,27 @@ class FcmService {
 
   static final FcmService instance = FcmService._();
 
+  static const String registerEndpointPath = '/api/v1/fcm-token';
+  static const String logoutEndpointPath = '/api/auth/logout';
   static const String pushEnabledKey = 'settings.push.enabled';
   static const String commentEnabledKey = 'settings.push.comment';
   static const String noticeEnabledKey = 'settings.push.notice';
   static const String eventEnabledKey = 'settings.push.event';
 
-  static const String _commentTopic = 'apt_comment';
-  static const String _noticeTopic = 'apt_notice';
-  static const String _eventTopic = 'apt_event';
   static const String _authTokenKey = 'auth_token';
+  static const String _deviceIdKey = 'device.id';
   static const String _lastFcmTokenKey = 'fcm.last.token';
+
+  static const String _commentTopic = 'comment';
+  static const String _noticeTopic = 'notice';
+  static const String _newPostTopic = 'new_post';
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   FirebaseMessaging? _messaging;
-  Uri? _fcmTokenEndpoint;
+  Uri? _registerEndpoint;
+  Uri? _logoutEndpoint;
   bool _isInitialized = false;
   bool _pushEnabled = true;
   bool _commentEnabled = true;
@@ -68,13 +74,15 @@ class FcmService {
     }
 
     _messaging = messaging;
-    _fcmTokenEndpoint = _resolveFcmTokenEndpoint(fallbackBaseUrl);
+    _registerEndpoint = _resolveEndpoint(fallbackBaseUrl, registerEndpointPath);
+    _logoutEndpoint = _resolveEndpoint(fallbackBaseUrl, logoutEndpointPath);
 
     await _loadPreferenceCache();
 
     if (_pushEnabled) {
       await _requestPermission();
     }
+
     await _initializeLocalNotifications(onOpenUrl, fallbackBaseUrl);
     await _syncTopicSubscriptions();
 
@@ -94,17 +102,15 @@ class FcmService {
       if (!_pushEnabled) {
         return;
       }
+
       final String targetUrl = _extractTargetUrl(message, fallbackBaseUrl);
       onOpenUrl(targetUrl);
     });
 
-    await _printCurrentToken();
+    await syncCurrentDeviceRegistration();
 
     messaging.onTokenRefresh.listen((String refreshedToken) {
-      if (_pushEnabled) {
-        debugPrint('FCM token refreshed: $refreshedToken');
-        _syncTokenWithBackend(token: refreshedToken, pushEnabled: true);
-      }
+      syncCurrentDeviceRegistration(token: refreshedToken);
     });
 
     _isInitialized = true;
@@ -139,19 +145,112 @@ class FcmService {
 
     if (_pushEnabled) {
       await _requestPermission();
-      await _printCurrentToken();
+      await syncCurrentDeviceRegistration();
       return;
     }
 
-    final String? currentToken = await _messaging?.getToken();
-    await _syncTokenWithBackend(token: currentToken, pushEnabled: false);
+    await logoutCurrentDevice();
+  }
 
-    await _localNotifications.cancelAll();
-    final FirebaseMessaging? messaging = _messaging;
-    if (messaging != null) {
-      await messaging.deleteToken();
-      debugPrint('FCM token deleted: push disabled');
+  Future<void> syncCurrentDeviceRegistration({String? token}) async {
+    if (!_isInitialized || !_pushEnabled) {
+      return;
     }
+
+    final FirebaseMessaging? messaging = _messaging;
+    if (messaging == null) {
+      return;
+    }
+
+    final String? authToken = await _readAuthToken();
+    if (authToken == null || authToken.isEmpty) {
+      debugPrint('FCM registration skipped: auth token not found');
+      return;
+    }
+
+    String? currentToken = token;
+    try {
+      currentToken ??= await messaging.getToken();
+    } catch (error) {
+      debugPrint('FCM token fetch skipped: $error');
+      return;
+    }
+
+    if (currentToken == null || currentToken.isEmpty) {
+      return;
+    }
+
+    final _DeviceMetadata deviceMetadata = await _resolveDeviceMetadata();
+    final String appVersion = await _resolveAppVersion();
+
+    await _registerTokenWithBackend(
+      authToken: authToken,
+      token: currentToken,
+      deviceId: deviceMetadata.deviceId,
+      deviceName: deviceMetadata.deviceName,
+      appVersion: appVersion,
+    );
+  }
+
+  Future<void> logoutCurrentDevice() async {
+    final FirebaseMessaging? messaging = _messaging;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? authToken = prefs.getString(_authTokenKey);
+
+    if (authToken != null && authToken.isNotEmpty) {
+      final Uri? endpoint = _logoutEndpoint;
+      if (endpoint != null) {
+        String? currentToken;
+        if (messaging != null) {
+          try {
+            currentToken = await messaging.getToken();
+          } catch (error) {
+            debugPrint('FCM logout token fetch skipped: $error');
+          }
+        }
+
+        final _DeviceMetadata deviceMetadata = await _resolveDeviceMetadata();
+        final Map<String, dynamic> body = <String, dynamic>{
+          if (currentToken != null && currentToken.isNotEmpty)
+            'fcm_token': currentToken,
+          'device_id': deviceMetadata.deviceId,
+          'device_name': deviceMetadata.deviceName,
+        };
+
+        try {
+          final http.Response response = await http.post(
+            endpoint,
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $authToken',
+            },
+            body: jsonEncode(body),
+          );
+
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            debugPrint('FCM backend delete success: ${response.statusCode}');
+          } else {
+            debugPrint(
+              'FCM backend delete failed: ${response.statusCode} ${response.body}',
+            );
+          }
+        } catch (error) {
+          debugPrint('FCM backend delete error: $error');
+        }
+      }
+    } else {
+      debugPrint('FCM delete skipped: auth token not found');
+    }
+
+    if (messaging != null) {
+      try {
+        await messaging.deleteToken();
+      } catch (error) {
+        debugPrint('FCM local token delete failed: $error');
+      }
+    }
+
+    await prefs.remove(_lastFcmTokenKey);
   }
 
   static Future<String> getInitialTargetUrl({
@@ -210,7 +309,7 @@ class FcmService {
     final Map<String, bool> topicStates = <String, bool>{
       _commentTopic: _pushEnabled && _commentEnabled,
       _noticeTopic: _pushEnabled && _noticeEnabled,
-      _eventTopic: _pushEnabled && _eventEnabled,
+      _newPostTopic: _pushEnabled && _eventEnabled,
     };
 
     for (final MapEntry<String, bool> entry in topicStates.entries) {
@@ -223,30 +322,6 @@ class FcmService {
       } catch (error) {
         debugPrint('FCM topic sync skipped for ${entry.key}: $error');
       }
-    }
-  }
-
-  Future<void> _printCurrentToken() async {
-    if (!_pushEnabled) {
-      return;
-    }
-
-    final FirebaseMessaging? messaging = _messaging;
-    if (messaging == null) {
-      return;
-    }
-
-    String? token;
-    try {
-      token = await messaging.getToken();
-    } catch (error) {
-      debugPrint('FCM token fetch skipped: $error');
-      return;
-    }
-
-    if (token != null) {
-      debugPrint('FCM token: $token');
-      await _syncTokenWithBackend(token: token, pushEnabled: true);
     }
   }
 
@@ -272,35 +347,29 @@ class FcmService {
     }
   }
 
-  Uri _resolveFcmTokenEndpoint(String fallbackBaseUrl) {
+  Uri _resolveEndpoint(String fallbackBaseUrl, String path) {
     final Uri baseUri = Uri.parse(fallbackBaseUrl);
-    return baseUri.resolve('/api/v1/fcm-token');
+    return baseUri.resolve(path);
   }
 
-  Future<void> _syncTokenWithBackend({
-    required String? token,
-    required bool pushEnabled,
+  Future<void> _registerTokenWithBackend({
+    required String authToken,
+    required String token,
+    required String deviceId,
+    required String deviceName,
+    required String appVersion,
   }) async {
-    final Uri? endpoint = _fcmTokenEndpoint;
+    final Uri? endpoint = _registerEndpoint;
     if (endpoint == null) {
       return;
     }
 
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final String? authToken = prefs.getString(_authTokenKey);
-
-    if (authToken == null || authToken.isEmpty) {
-      debugPrint('FCM backend sync skipped: auth token not found');
-      return;
-    }
-
-    final String? effectiveToken = token ?? prefs.getString(_lastFcmTokenKey);
-
     final Map<String, dynamic> body = <String, dynamic>{
-      'token': effectiveToken,
-      'push_enabled': pushEnabled,
+      'token': token,
       'platform': _platformName(),
-      'topics': _enabledTopics(),
+      'device_id': deviceId,
+      'device_name': deviceName,
+      'app_version': appVersion,
     };
 
     try {
@@ -314,31 +383,87 @@ class FcmService {
       );
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        if (effectiveToken != null && effectiveToken.isNotEmpty) {
-          await prefs.setString(_lastFcmTokenKey, effectiveToken);
-        }
-        debugPrint('FCM backend sync success: ${response.statusCode}');
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_lastFcmTokenKey, token);
+        debugPrint('FCM backend register success: ${response.statusCode}');
         return;
       }
 
       debugPrint(
-        'FCM backend sync failed: ${response.statusCode} ${response.body}',
+        'FCM backend register failed: ${response.statusCode} ${response.body}',
       );
     } catch (error) {
-      debugPrint('FCM backend sync error: $error');
+      debugPrint('FCM backend register error: $error');
     }
   }
 
-  List<String> _enabledTopics() {
-    if (!_pushEnabled) {
-      return <String>[];
+  Future<String?> _readAuthToken() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_authTokenKey);
+  }
+
+  Future<String> _resolveAppVersion() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      return '${info.version}+${info.buildNumber}';
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  Future<_DeviceMetadata> _resolveDeviceMetadata() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String deviceId = prefs.getString(_deviceIdKey) ?? '';
+    String deviceName = _fallbackDeviceName();
+
+    try {
+      final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        final AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+        deviceId = androidInfo.id;
+        deviceName = '${androidInfo.brand} ${androidInfo.model}'.trim();
+      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
+        deviceId = iosInfo.identifierForVendor ?? deviceId;
+        deviceName = iosInfo.name.isNotEmpty ? iosInfo.name : 'iPhone';
+      } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+        final MacOsDeviceInfo macInfo = await deviceInfo.macOsInfo;
+        deviceId = macInfo.systemGUID ?? deviceId;
+        deviceName =
+            macInfo.computerName.isNotEmpty ? macInfo.computerName : 'macOS';
+      }
+    } catch (error) {
+      debugPrint('FCM device metadata fallback used: $error');
     }
 
-    return <String>[
-      if (_commentEnabled) _commentTopic,
-      if (_noticeEnabled) _noticeTopic,
-      if (_eventEnabled) _eventTopic,
-    ];
+    if (deviceId.isEmpty) {
+      deviceId = _fallbackDeviceId();
+    }
+
+    await prefs.setString(_deviceIdKey, deviceId);
+    return _DeviceMetadata(deviceId: deviceId, deviceName: deviceName);
+  }
+
+  String _fallbackDeviceId() {
+    return 'device-${defaultTargetPlatform.name}-${DateTime.now().microsecondsSinceEpoch}';
+  }
+
+  String _fallbackDeviceName() {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'Android';
+      case TargetPlatform.iOS:
+        return 'iOS';
+      case TargetPlatform.macOS:
+        return 'macOS';
+      case TargetPlatform.windows:
+        return 'Windows';
+      case TargetPlatform.linux:
+        return 'Linux';
+      case TargetPlatform.fuchsia:
+        return 'Fuchsia';
+    }
   }
 
   String _platformName() {
@@ -460,8 +585,6 @@ class FcmService {
       ...message.data,
       if (message.notification?.android?.link != null)
         'url': message.notification!.android!.link.toString(),
-      if (message.notification?.apple?.imageUrl != null)
-        'image_url': message.notification!.apple!.imageUrl,
     };
 
     return _extractTargetUrlFromMap(mergedData, fallbackBaseUrl);
@@ -471,10 +594,23 @@ class FcmService {
     Map<String, dynamic> data,
     String fallbackBaseUrl,
   ) {
+    final String? notificationType =
+        data['type']?.toString() ?? data['notificationType']?.toString();
+    final String? postId = data['post_id']?.toString();
     final String? rawUrl =
         data['url']?.toString() ??
         data['deep_link']?.toString() ??
         data['link']?.toString();
+
+    final String? routedUrl = _buildRoutedUrl(
+      notificationType: notificationType,
+      postId: postId,
+      fallbackBaseUrl: fallbackBaseUrl,
+    );
+
+    if (routedUrl != null) {
+      return routedUrl;
+    }
 
     if (rawUrl == null || rawUrl.isEmpty) {
       return fallbackBaseUrl;
@@ -493,6 +629,34 @@ class FcmService {
     return baseUri.resolveUri(parsed).toString();
   }
 
+  static String? _buildRoutedUrl({
+    required String? notificationType,
+    required String? postId,
+    required String fallbackBaseUrl,
+  }) {
+    if (notificationType == null || notificationType.isEmpty) {
+      return null;
+    }
+
+    final String normalizedType = notificationType.toLowerCase();
+    final bool hasPostId = postId != null && postId.isNotEmpty;
+    if (!hasPostId) {
+      return null;
+    }
+
+    if (normalizedType.contains('notice')) {
+      return Uri.parse(fallbackBaseUrl).resolve('/notices/$postId').toString();
+    }
+
+    if (normalizedType.contains('new_post') ||
+        normalizedType.contains('comment') ||
+        normalizedType.contains('post')) {
+      return Uri.parse(fallbackBaseUrl).resolve('/posts/$postId').toString();
+    }
+
+    return null;
+  }
+
   bool _isMessageAllowedByCategory(Map<String, dynamic> data) {
     final String category =
         (data['type'] ?? data['category'] ?? data['notificationType'] ?? '')
@@ -505,9 +669,16 @@ class FcmService {
     if (category.contains('notice')) {
       return _noticeEnabled;
     }
-    if (category.contains('event')) {
+    if (category.contains('new_post') || category.contains('post')) {
       return _eventEnabled;
     }
     return true;
   }
+}
+
+class _DeviceMetadata {
+  const _DeviceMetadata({required this.deviceId, required this.deviceName});
+
+  final String deviceId;
+  final String deviceName;
 }

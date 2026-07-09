@@ -75,6 +75,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _handleLogout() async {
+    await FcmService.instance.logoutCurrentDevice();
+
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
 
@@ -141,7 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : null,
         ),
         SwitchListTile(
-          title: const Text('이벤트 알림'),
+          title: const Text('새 글 알림'),
           value: _eventEnabled,
           onChanged:
               _pushEnabled

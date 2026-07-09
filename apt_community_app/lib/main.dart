@@ -39,7 +39,8 @@ class AptCommunityApp extends StatefulWidget {
   State<AptCommunityApp> createState() => _AptCommunityAppState();
 }
 
-class _AptCommunityAppState extends State<AptCommunityApp> {
+class _AptCommunityAppState extends State<AptCommunityApp>
+    with WidgetsBindingObserver {
   final ValueNotifier<String?> _pendingOpenUrl = ValueNotifier<String?>(null);
 
   late final GoRouter _router = GoRouter(
@@ -59,7 +60,15 @@ class _AptCommunityAppState extends State<AptCommunityApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeFcm();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      FcmService.instance.syncCurrentDeviceRegistration();
+    }
   }
 
   Future<void> _initializeFcm() async {
@@ -74,6 +83,7 @@ class _AptCommunityAppState extends State<AptCommunityApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pendingOpenUrl.dispose();
     super.dispose();
   }

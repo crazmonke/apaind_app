@@ -1,7 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
+import '../services/fcm_service.dart';
 
 class WebViewScreen extends StatefulWidget {
   const WebViewScreen({
@@ -52,6 +55,47 @@ class WebViewScreenState extends State<WebViewScreen> {
     await _controller.clearLocalStorage();
   }
 
+  Future<void> _captureAuthTokenIfPresent() async {
+    try {
+      final Object result = await _controller.runJavaScriptReturningResult(
+        "window.localStorage.getItem('auth_token')",
+      );
+
+      final String? token = _normalizeJavaScriptString(result);
+      if (token == null || token.isEmpty) {
+        return;
+      }
+
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? currentToken = prefs.getString('auth_token');
+      if (currentToken == token) {
+        return;
+      }
+
+      await prefs.setString('auth_token', token);
+      await FcmService.instance.syncCurrentDeviceRegistration();
+    } catch (_) {
+      // 로그인 상태를 읽을 수 없으면 조용히 무시한다.
+    }
+  }
+
+  String? _normalizeJavaScriptString(Object? result) {
+    if (result == null) {
+      return null;
+    }
+
+    final String raw = result.toString();
+    if (raw == 'null' || raw == 'undefined') {
+      return null;
+    }
+
+    if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+      return raw.substring(1, raw.length - 1);
+    }
+
+    return raw;
+  }
+
   WebViewController _buildController(String initialUrl) {
     final WebViewController controller =
         WebViewController()
@@ -70,6 +114,7 @@ class WebViewScreenState extends State<WebViewScreen> {
                 setState(() {
                   _isLoading = false;
                 });
+                _captureAuthTokenIfPresent();
               },
               onWebResourceError: (WebResourceError error) {
                 if (!mounted) return;
