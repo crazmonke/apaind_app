@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "205320099452",
+    "project_id": "apaind",
+    "storage_bucket": "apaind.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:205320099452:android:8df6653ce564c5aab89bf9",
+        "android_client_info": {
+          "package_name": "com.example.apt_community_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBkUi-VZWg5EzioK9o74f0pDmthH6ZicFA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
