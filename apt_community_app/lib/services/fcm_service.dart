@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 @pragma('vm:entry-point')
@@ -31,11 +32,14 @@ class FcmService {
   static const String _commentTopic = 'apt_comment';
   static const String _noticeTopic = 'apt_notice';
   static const String _eventTopic = 'apt_event';
+  static const String _authTokenKey = 'auth_token';
+  static const String _lastFcmTokenKey = 'fcm.last.token';
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   FirebaseMessaging? _messaging;
+  Uri? _fcmTokenEndpoint;
   bool _isInitialized = false;
   bool _pushEnabled = true;
   bool _commentEnabled = true;
@@ -64,6 +68,7 @@ class FcmService {
     }
 
     _messaging = messaging;
+    _fcmTokenEndpoint = _resolveFcmTokenEndpoint(fallbackBaseUrl);
 
     await _loadPreferenceCache();
 
@@ -98,7 +103,7 @@ class FcmService {
     messaging.onTokenRefresh.listen((String refreshedToken) {
       if (_pushEnabled) {
         debugPrint('FCM token refreshed: $refreshedToken');
-        // TODO: 토큰 갱신 시 서버 갱신 호출.
+        _syncTokenWithBackend(token: refreshedToken, pushEnabled: true);
       }
     });
 
@@ -137,6 +142,9 @@ class FcmService {
       await _printCurrentToken();
       return;
     }
+
+    final String? currentToken = await _messaging?.getToken();
+    await _syncTokenWithBackend(token: currentToken, pushEnabled: false);
 
     await _localNotifications.cancelAll();
     final FirebaseMessaging? messaging = _messaging;
@@ -195,6 +203,10 @@ class FcmService {
       return;
     }
 
+    if (!await _canSyncTopics(messaging)) {
+      return;
+    }
+
     final Map<String, bool> topicStates = <String, bool>{
       _commentTopic: _pushEnabled && _commentEnabled,
       _noticeTopic: _pushEnabled && _noticeEnabled,
@@ -202,10 +214,14 @@ class FcmService {
     };
 
     for (final MapEntry<String, bool> entry in topicStates.entries) {
-      if (entry.value) {
-        await messaging.subscribeToTopic(entry.key);
-      } else {
-        await messaging.unsubscribeFromTopic(entry.key);
+      try {
+        if (entry.value) {
+          await messaging.subscribeToTopic(entry.key);
+        } else {
+          await messaging.unsubscribeFromTopic(entry.key);
+        }
+      } catch (error) {
+        debugPrint('FCM topic sync skipped for ${entry.key}: $error');
       }
     }
   }
@@ -220,10 +236,125 @@ class FcmService {
       return;
     }
 
-    final String? token = await messaging.getToken();
+    String? token;
+    try {
+      token = await messaging.getToken();
+    } catch (error) {
+      debugPrint('FCM token fetch skipped: $error');
+      return;
+    }
+
     if (token != null) {
       debugPrint('FCM token: $token');
-      // TODO: Laravel API(/api/v1/fcm-token) 연동 시 서버로 토큰 전송.
+      await _syncTokenWithBackend(token: token, pushEnabled: true);
+    }
+  }
+
+  Future<bool> _canSyncTopics(FirebaseMessaging messaging) async {
+    final bool isApplePlatform =
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS;
+
+    if (!isApplePlatform) {
+      return true;
+    }
+
+    try {
+      final String? apnsToken = await messaging.getAPNSToken();
+      if (apnsToken == null || apnsToken.isEmpty) {
+        debugPrint('FCM topic sync deferred: APNS token is not ready yet.');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      debugPrint('FCM topic sync deferred: $error');
+      return false;
+    }
+  }
+
+  Uri _resolveFcmTokenEndpoint(String fallbackBaseUrl) {
+    final Uri baseUri = Uri.parse(fallbackBaseUrl);
+    return baseUri.resolve('/api/v1/fcm-token');
+  }
+
+  Future<void> _syncTokenWithBackend({
+    required String? token,
+    required bool pushEnabled,
+  }) async {
+    final Uri? endpoint = _fcmTokenEndpoint;
+    if (endpoint == null) {
+      return;
+    }
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? authToken = prefs.getString(_authTokenKey);
+
+    if (authToken == null || authToken.isEmpty) {
+      debugPrint('FCM backend sync skipped: auth token not found');
+      return;
+    }
+
+    final String? effectiveToken = token ?? prefs.getString(_lastFcmTokenKey);
+
+    final Map<String, dynamic> body = <String, dynamic>{
+      'token': effectiveToken,
+      'push_enabled': pushEnabled,
+      'platform': _platformName(),
+      'topics': _enabledTopics(),
+    };
+
+    try {
+      final http.Response response = await http.post(
+        endpoint,
+        headers: <String, String>{
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $authToken',
+        },
+        body: jsonEncode(body),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        if (effectiveToken != null && effectiveToken.isNotEmpty) {
+          await prefs.setString(_lastFcmTokenKey, effectiveToken);
+        }
+        debugPrint('FCM backend sync success: ${response.statusCode}');
+        return;
+      }
+
+      debugPrint(
+        'FCM backend sync failed: ${response.statusCode} ${response.body}',
+      );
+    } catch (error) {
+      debugPrint('FCM backend sync error: $error');
+    }
+  }
+
+  List<String> _enabledTopics() {
+    if (!_pushEnabled) {
+      return <String>[];
+    }
+
+    return <String>[
+      if (_commentEnabled) _commentTopic,
+      if (_noticeEnabled) _noticeTopic,
+      if (_eventEnabled) _eventTopic,
+    ];
+  }
+
+  String _platformName() {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'android';
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.macOS:
+        return 'macos';
+      case TargetPlatform.windows:
+        return 'windows';
+      case TargetPlatform.linux:
+        return 'linux';
+      case TargetPlatform.fuchsia:
+        return 'fuchsia';
     }
   }
 
