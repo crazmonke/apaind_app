@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -8,13 +10,7 @@ import 'services/fcm_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await _ensureFirebaseInitialized();
-
-  final String initialUrl = await FcmService.getInitialTargetUrl(
-    fallbackBaseUrl: kBaseWebUrl,
-  );
-
-  runApp(AptCommunityApp(initialUrl: initialUrl));
+  runApp(const AptCommunityApp(initialUrl: kBaseWebUrl));
 }
 
 Future<void> _ensureFirebaseInitialized() async {
@@ -61,7 +57,7 @@ class _AptCommunityAppState extends State<AptCommunityApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeFcm();
+    _bootstrapAppServices();
   }
 
   @override
@@ -71,7 +67,27 @@ class _AptCommunityAppState extends State<AptCommunityApp>
     }
   }
 
-  Future<void> _initializeFcm() async {
+  Future<void> _bootstrapAppServices() async {
+    try {
+      await _ensureFirebaseInitialized().timeout(const Duration(seconds: 6));
+    } on TimeoutException {
+      debugPrint('Firebase initialization timed out.');
+    }
+
+    try {
+      final String initialTargetUrl = await FcmService.getInitialTargetUrl(
+        fallbackBaseUrl: kBaseWebUrl,
+      ).timeout(const Duration(seconds: 3));
+
+      if (mounted && initialTargetUrl.isNotEmpty && initialTargetUrl != kBaseWebUrl) {
+        _pendingOpenUrl.value = initialTargetUrl;
+      }
+    } on TimeoutException {
+      debugPrint('Initial FCM target URL fetch timed out.');
+    } catch (error) {
+      debugPrint('Initial FCM target URL fetch skipped: $error');
+    }
+
     await FcmService.instance.initialize(
       fallbackBaseUrl: kBaseWebUrl,
       onOpenUrl: (String targetUrl) {

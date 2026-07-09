@@ -25,13 +25,22 @@ class WebViewScreen extends StatefulWidget {
 class WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
+  bool _isSlowLoading = false;
   String? _errorMessage;
   late String _currentUrl;
+  int _loadCycle = 0;
 
   @override
   void initState() {
     super.initState();
-    _currentUrl = widget.initialUrl;
+    final Uri? parsedInitial = Uri.tryParse(widget.initialUrl);
+    if (parsedInitial == null || !parsedInitial.hasScheme) {
+      _currentUrl = widget.initialUrl;
+      _isLoading = false;
+      _errorMessage = '잘못된 초기 주소입니다.\n앱 설정을 확인해 주세요.';
+    } else {
+      _currentUrl = parsedInitial.toString();
+    }
     _controller = _buildController(widget.initialUrl);
   }
 
@@ -45,9 +54,26 @@ class WebViewScreenState extends State<WebViewScreen> {
   }
 
   Future<void> openUrl(String url) async {
-    _currentUrl = url;
+    debugPrint('WebView openUrl: $url');
+    final Uri? parsed = Uri.tryParse(url);
+    if (parsed == null || !parsed.hasScheme) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _currentUrl = url;
+        _isLoading = false;
+        _isSlowLoading = false;
+        _errorMessage = '잘못된 주소입니다.\n설정에서 기본 주소를 확인해 주세요.';
+      });
+      debugPrint('WebView openUrl ignored (invalid URL): $url');
+      return;
+    }
+
+    _currentUrl = parsed.toString();
     _errorMessage = null;
-    await _controller.loadRequest(Uri.parse(url));
+    await _controller.loadRequest(parsed);
   }
 
   Future<void> clearCache() async {
@@ -97,6 +123,7 @@ class WebViewScreenState extends State<WebViewScreen> {
   }
 
   WebViewController _buildController(String initialUrl) {
+    final Uri initialUri = Uri.tryParse(initialUrl) ?? Uri.parse('about:blank');
     final WebViewController controller =
         WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -104,16 +131,40 @@ class WebViewScreenState extends State<WebViewScreen> {
             NavigationDelegate(
               onPageStarted: (_) {
                 if (!mounted) return;
+                _loadCycle += 1;
+                final int thisCycle = _loadCycle;
+                debugPrint('WebView onPageStarted: $_currentUrl');
                 setState(() {
                   _isLoading = true;
+                  _isSlowLoading = false;
                   _errorMessage = null;
+                });
+
+                Future<void>.delayed(const Duration(seconds: 12), () {
+                  if (!mounted) {
+                    return;
+                  }
+
+                  if (_loadCycle != thisCycle) {
+                    return;
+                  }
+
+                  if (_isLoading && _errorMessage == null) {
+                    setState(() {
+                      _isSlowLoading = true;
+                    });
+                    debugPrint('WebView slow loading detected: $_currentUrl');
+                  }
                 });
               },
               onPageFinished: (_) {
                 if (!mounted) return;
+                debugPrint('WebView onPageFinished: $_currentUrl');
                 setState(() {
                   _isLoading = false;
+                  _isSlowLoading = false;
                 });
+                _logPageSnapshot();
                 _captureAuthTokenIfPresent();
               },
               onWebResourceError: (WebResourceError error) {
@@ -123,16 +174,45 @@ class WebViewScreenState extends State<WebViewScreen> {
                   return;
                 }
 
+                debugPrint(
+                  'WebView onWebResourceError: '
+                  'code=${error.errorCode}, '
+                  'type=${error.errorType}, '
+                  'description=${error.description}, '
+                  'url=$_currentUrl',
+                );
+
                 setState(() {
                   _isLoading = false;
+                  _isSlowLoading = false;
                   _errorMessage = _toFriendlyError(error);
                 });
               },
             ),
           )
-          ..loadRequest(Uri.parse(initialUrl));
+          ..loadRequest(initialUri);
 
     return controller;
+  }
+
+  Future<void> _logPageSnapshot() async {
+    try {
+      final Object readyState = await _controller.runJavaScriptReturningResult(
+        'document.readyState',
+      );
+      final Object title = await _controller.runJavaScriptReturningResult(
+        'document.title',
+      );
+      final Object bodyLength = await _controller.runJavaScriptReturningResult(
+        'document.body && document.body.innerText ? document.body.innerText.length : -1',
+      );
+
+      debugPrint(
+        'WebView snapshot: readyState=$readyState, title=$title, bodyLength=$bodyLength, url=$_currentUrl',
+      );
+    } catch (error) {
+      debugPrint('WebView snapshot skipped: $error');
+    }
   }
 
   String _toFriendlyError(WebResourceError error) {
@@ -155,12 +235,26 @@ class WebViewScreenState extends State<WebViewScreen> {
   }
 
   Future<void> _reload() async {
+    final Uri? parsed = Uri.tryParse(_currentUrl);
+    if (parsed == null || !parsed.hasScheme) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _isLoading = false;
+        _isSlowLoading = false;
+        _errorMessage = '잘못된 주소입니다.\n설정에서 기본 주소를 확인해 주세요.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    await _controller.loadRequest(Uri.parse(_currentUrl));
+    await _controller.loadRequest(parsed);
   }
 
   @override
@@ -173,6 +267,37 @@ class WebViewScreenState extends State<WebViewScreen> {
                 WebViewWidget(controller: _controller),
                 if (_isLoading)
                   const Center(child: CircularProgressIndicator()),
+                if (_isSlowLoading)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    top: 12,
+                    child: Material(
+                      elevation: 1,
+                      borderRadius: BorderRadius.circular(10),
+                      color: const Color(0xFFF9FAFB),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            const Expanded(
+                              child: Text(
+                                '페이지 로딩이 지연되고 있습니다. 네트워크 상태를 확인해 주세요.',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _reload,
+                              child: const Text('다시 시도'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             );
 
