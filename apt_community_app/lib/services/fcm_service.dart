@@ -4,10 +4,18 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // 백그라운드 메시지 수신 시 isolate에서 호출된다.
+  if (Firebase.apps.isEmpty) {
+    try {
+      await Firebase.initializeApp();
+    } catch (_) {
+      // 설정 파일 누락 등으로 초기화 실패 시 백그라운드 처리를 생략한다.
+    }
+  }
 }
 
 class FcmService {
@@ -15,10 +23,24 @@ class FcmService {
 
   static final FcmService instance = FcmService._();
 
+  static const String pushEnabledKey = 'settings.push.enabled';
+  static const String commentEnabledKey = 'settings.push.comment';
+  static const String noticeEnabledKey = 'settings.push.notice';
+  static const String eventEnabledKey = 'settings.push.event';
+
+  static const String _commentTopic = 'apt_comment';
+  static const String _noticeTopic = 'apt_notice';
+  static const String _eventTopic = 'apt_event';
+
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
+  FirebaseMessaging? _messaging;
   bool _isInitialized = false;
+  bool _pushEnabled = true;
+  bool _commentEnabled = true;
+  bool _noticeEnabled = true;
+  bool _eventEnabled = true;
 
   Future<void> initialize({
     required String fallbackBaseUrl,
@@ -41,8 +63,21 @@ class FcmService {
       return;
     }
 
-    await _requestPermission();
+    _messaging = messaging;
+
+    await _loadPreferenceCache();
+
+    if (_pushEnabled) {
+      await _requestPermission();
+    }
     await _initializeLocalNotifications(onOpenUrl, fallbackBaseUrl);
+    await _syncTopicSubscriptions();
+
+    await messaging.setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
@@ -51,22 +86,64 @@ class FcmService {
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      if (!_pushEnabled) {
+        return;
+      }
       final String targetUrl = _extractTargetUrl(message, fallbackBaseUrl);
       onOpenUrl(targetUrl);
     });
 
-    final String? token = await messaging.getToken();
-    if (token != null) {
-      debugPrint('FCM token: $token');
-      // TODO: Laravel API(/api/v1/fcm-token) 연동 시 서버로 토큰 전송.
-    }
+    await _printCurrentToken();
 
     messaging.onTokenRefresh.listen((String refreshedToken) {
-      debugPrint('FCM token refreshed: $refreshedToken');
-      // TODO: 토큰 갱신 시 서버 갱신 호출.
+      if (_pushEnabled) {
+        debugPrint('FCM token refreshed: $refreshedToken');
+        // TODO: 토큰 갱신 시 서버 갱신 호출.
+      }
     });
 
     _isInitialized = true;
+  }
+
+  Future<void> applyPreferenceChanges({
+    bool? pushEnabled,
+    bool? commentEnabled,
+    bool? noticeEnabled,
+    bool? eventEnabled,
+  }) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    if (pushEnabled != null) {
+      _pushEnabled = pushEnabled;
+      await prefs.setBool(pushEnabledKey, pushEnabled);
+    }
+    if (commentEnabled != null) {
+      _commentEnabled = commentEnabled;
+      await prefs.setBool(commentEnabledKey, commentEnabled);
+    }
+    if (noticeEnabled != null) {
+      _noticeEnabled = noticeEnabled;
+      await prefs.setBool(noticeEnabledKey, noticeEnabled);
+    }
+    if (eventEnabled != null) {
+      _eventEnabled = eventEnabled;
+      await prefs.setBool(eventEnabledKey, eventEnabled);
+    }
+
+    await _syncTopicSubscriptions();
+
+    if (_pushEnabled) {
+      await _requestPermission();
+      await _printCurrentToken();
+      return;
+    }
+
+    await _localNotifications.cancelAll();
+    final FirebaseMessaging? messaging = _messaging;
+    if (messaging != null) {
+      await messaging.deleteToken();
+      debugPrint('FCM token deleted: push disabled');
+    }
   }
 
   static Future<String> getInitialTargetUrl({
@@ -91,7 +168,7 @@ class FcmService {
   }
 
   Future<void> _requestPermission() async {
-    final FirebaseMessaging? messaging = _safeMessagingInstance();
+    final FirebaseMessaging? messaging = _messaging ?? _safeMessagingInstance();
     if (messaging == null) {
       return;
     }
@@ -102,6 +179,52 @@ class FcmService {
       sound: true,
       provisional: false,
     );
+  }
+
+  Future<void> _loadPreferenceCache() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    _pushEnabled = prefs.getBool(pushEnabledKey) ?? true;
+    _commentEnabled = prefs.getBool(commentEnabledKey) ?? true;
+    _noticeEnabled = prefs.getBool(noticeEnabledKey) ?? true;
+    _eventEnabled = prefs.getBool(eventEnabledKey) ?? true;
+  }
+
+  Future<void> _syncTopicSubscriptions() async {
+    final FirebaseMessaging? messaging = _messaging;
+    if (messaging == null) {
+      return;
+    }
+
+    final Map<String, bool> topicStates = <String, bool>{
+      _commentTopic: _pushEnabled && _commentEnabled,
+      _noticeTopic: _pushEnabled && _noticeEnabled,
+      _eventTopic: _pushEnabled && _eventEnabled,
+    };
+
+    for (final MapEntry<String, bool> entry in topicStates.entries) {
+      if (entry.value) {
+        await messaging.subscribeToTopic(entry.key);
+      } else {
+        await messaging.unsubscribeFromTopic(entry.key);
+      }
+    }
+  }
+
+  Future<void> _printCurrentToken() async {
+    if (!_pushEnabled) {
+      return;
+    }
+
+    final FirebaseMessaging? messaging = _messaging;
+    if (messaging == null) {
+      return;
+    }
+
+    final String? token = await messaging.getToken();
+    if (token != null) {
+      debugPrint('FCM token: $token');
+      // TODO: Laravel API(/api/v1/fcm-token) 연동 시 서버로 토큰 전송.
+    }
   }
 
   FirebaseMessaging? _safeMessagingInstance() {
@@ -165,6 +288,14 @@ class FcmService {
   }
 
   Future<void> _showForegroundNotification(RemoteMessage message) async {
+    if (!_pushEnabled) {
+      return;
+    }
+
+    if (!_isMessageAllowedByCategory(message.data)) {
+      return;
+    }
+
     final RemoteNotification? notification = message.notification;
     if (notification == null) {
       return;
@@ -194,14 +325,25 @@ class FcmService {
     RemoteMessage message,
     String fallbackBaseUrl,
   ) {
-    return _extractTargetUrlFromMap(message.data, fallbackBaseUrl);
+    final Map<String, dynamic> mergedData = <String, dynamic>{
+      ...message.data,
+      if (message.notification?.android?.link != null)
+        'url': message.notification!.android!.link.toString(),
+      if (message.notification?.apple?.imageUrl != null)
+        'image_url': message.notification!.apple!.imageUrl,
+    };
+
+    return _extractTargetUrlFromMap(mergedData, fallbackBaseUrl);
   }
 
   static String _extractTargetUrlFromMap(
     Map<String, dynamic> data,
     String fallbackBaseUrl,
   ) {
-    final String? rawUrl = data['url']?.toString();
+    final String? rawUrl =
+        data['url']?.toString() ??
+        data['deep_link']?.toString() ??
+        data['link']?.toString();
 
     if (rawUrl == null || rawUrl.isEmpty) {
       return fallbackBaseUrl;
@@ -218,5 +360,23 @@ class FcmService {
 
     final Uri baseUri = Uri.parse(fallbackBaseUrl);
     return baseUri.resolveUri(parsed).toString();
+  }
+
+  bool _isMessageAllowedByCategory(Map<String, dynamic> data) {
+    final String category =
+        (data['type'] ?? data['category'] ?? data['notificationType'] ?? '')
+            .toString()
+            .toLowerCase();
+
+    if (category.contains('comment')) {
+      return _commentEnabled;
+    }
+    if (category.contains('notice')) {
+      return _noticeEnabled;
+    }
+    if (category.contains('event')) {
+      return _eventEnabled;
+    }
+    return true;
   }
 }

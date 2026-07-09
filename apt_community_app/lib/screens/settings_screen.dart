@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
+import '../services/fcm_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -19,13 +20,10 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const String _pushEnabledKey = 'settings.push.enabled';
-  static const String _commentEnabledKey = 'settings.push.comment';
-  static const String _noticeEnabledKey = 'settings.push.notice';
-  static const String _eventEnabledKey = 'settings.push.event';
-
-  final FlutterLocalNotificationsPlugin _localNotifications =
-      FlutterLocalNotificationsPlugin();
+  static const String _pushEnabledKey = FcmService.pushEnabledKey;
+  static const String _commentEnabledKey = FcmService.commentEnabledKey;
+  static const String _noticeEnabledKey = FcmService.noticeEnabledKey;
+  static const String _eventEnabledKey = FcmService.eventEnabledKey;
 
   bool _isLoading = true;
   bool _pushEnabled = true;
@@ -64,10 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _pushEnabled = value;
     });
     await _saveBool(_pushEnabledKey, value);
-
-    if (!value) {
-      await _localNotifications.cancelAll();
-    }
+    await FcmService.instance.applyPreferenceChanges(pushEnabled: value);
   }
 
   Future<void> _handleClearCache() async {
@@ -123,6 +118,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _commentEnabled = value;
                     });
                     await _saveBool(_commentEnabledKey, value);
+                    await FcmService.instance.applyPreferenceChanges(
+                      commentEnabled: value,
+                    );
                   }
                   : null,
         ),
@@ -136,6 +134,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _noticeEnabled = value;
                     });
                     await _saveBool(_noticeEnabledKey, value);
+                    await FcmService.instance.applyPreferenceChanges(
+                      noticeEnabled: value,
+                    );
                   }
                   : null,
         ),
@@ -149,6 +150,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _eventEnabled = value;
                     });
                     await _saveBool(_eventEnabledKey, value);
+                    await FcmService.instance.applyPreferenceChanges(
+                      eventEnabled: value,
+                    );
                   }
                   : null,
         ),
