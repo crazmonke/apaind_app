@@ -57,6 +57,18 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     _applyTargetUrl(target);
   }
 
+  Future<void> _syncAndRefreshSettings() async {
+    // 활성 WebView(같은 도메인)의 localStorage에서 auth_token 상태를 SharedPreferences에 동기화
+    final WebViewScreenState? webView =
+        _homeKey.currentState ??
+        _communityKey.currentState ??
+        _notificationKey.currentState;
+    if (webView != null) {
+      await webView.syncAuthToken();
+    }
+    _settingsRefreshTick.value++;
+  }
+
   Future<void> _openFromSettings(String target) async {
     _applyTargetUrl(target);
   }
@@ -190,7 +202,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           setState(() {
             _currentIndex = index;
           });
-          if (index == 3) _settingsRefreshTick.value++;
+          if (index == 3) _syncAndRefreshSettings();
         },
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: '홈'),

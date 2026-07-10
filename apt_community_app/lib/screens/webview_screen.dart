@@ -113,9 +113,14 @@ class WebViewScreenState extends State<WebViewScreen> {
       );
 
       final String? token = _normalizeJavaScriptString(result);
-      if (token == null || token.isEmpty) return;
-
       final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+      if (token == null || token.isEmpty) {
+        // 웹사이트에서 로그아웃된 경우 SharedPreferences도 동기화
+        await prefs.remove('auth_token');
+        return;
+      }
+
       final String? currentToken = prefs.getString('auth_token');
       if (currentToken == token) return;
 
@@ -123,6 +128,9 @@ class WebViewScreenState extends State<WebViewScreen> {
       await FcmService.instance.syncCurrentDeviceRegistration();
     } catch (_) {}
   }
+
+  /// 설정 화면에서 로그인 상태 확인 시 호출 - localStorage → SharedPreferences 동기화
+  Future<void> syncAuthToken() => _captureAuthTokenIfPresent();
 
   String? _normalizeJavaScriptString(Object? result) {
     if (result == null) return null;
