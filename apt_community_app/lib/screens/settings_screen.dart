@@ -61,7 +61,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _noticeEnabled = prefs.getBool(_noticeEnabledKey) ?? true;
       _eventEnabled = prefs.getBool(_eventEnabledKey) ?? true;
       _appVersion = '${info.version}+${info.buildNumber}';
-      _isLoggedIn = (prefs.getString('auth_token') ?? '').isNotEmpty;
+      _isLoggedIn = prefs.getBool('is_web_logged_in') ?? false;
       _isLoading = false;
     });
   }
@@ -70,7 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _isLoggedIn = (prefs.getString('auth_token') ?? '').isNotEmpty;
+      _isLoggedIn = prefs.getBool('is_web_logged_in') ?? false;
     });
   }
 
@@ -102,6 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    await prefs.setBool('is_web_logged_in', false);
 
     final WebViewCookieManager cookieManager = WebViewCookieManager();
     await cookieManager.clearCookies();

@@ -113,14 +113,9 @@ class WebViewScreenState extends State<WebViewScreen> {
       );
 
       final String? token = _normalizeJavaScriptString(result);
+      if (token == null || token.isEmpty) return;
+
       final SharedPreferences prefs = await SharedPreferences.getInstance();
-
-      if (token == null || token.isEmpty) {
-        // 웹사이트에서 로그아웃된 경우 SharedPreferences도 동기화
-        await prefs.remove('auth_token');
-        return;
-      }
-
       final String? currentToken = prefs.getString('auth_token');
       if (currentToken == token) return;
 
@@ -129,8 +124,31 @@ class WebViewScreenState extends State<WebViewScreen> {
     } catch (_) {}
   }
 
-  /// 설정 화면에서 로그인 상태 확인 시 호출 - localStorage → SharedPreferences 동기화
-  Future<void> syncAuthToken() => _captureAuthTokenIfPresent();
+  /// 사이트-nav DOM의 "계정" 링크 href를 읽어 로그인 상태를 SharedPreferences에 저장
+  Future<void> syncAuthToken() async {
+    try {
+      final Object result = await _controller.runJavaScriptReturningResult(r'''
+        (function() {
+          var el = document.querySelector('a[aria-label="계정"]');
+          if (!el) return 'unknown';
+          var href = el.getAttribute('href') || '';
+          return href.indexOf('/settings') === 0 ? 'logged_in' : 'logged_out';
+        })()
+      ''');
+      final String raw = result.toString().replaceAll('"', '');
+      if (raw == 'unknown') return;
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_web_logged_in', raw == 'logged_in');
+    } catch (_) {}
+  }
+
+  Future<void> _handleLoginState(String state) async {
+    if (state != 'logged_in' && state != 'logged_out') return;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_web_logged_in', state == 'logged_in');
+    } catch (_) {}
+  }
 
   String? _normalizeJavaScriptString(Object? result) {
     if (result == null) return null;
@@ -151,6 +169,12 @@ class WebViewScreenState extends State<WebViewScreen> {
             'AppRefreshBridge',
             onMessageReceived: (JavaScriptMessage message) {
               _handleJsBridge(message.message);
+            },
+          )
+          ..addJavaScriptChannel(
+            'AppLoginBridge',
+            onMessageReceived: (JavaScriptMessage message) {
+              _handleLoginState(message.message);
             },
           )
           ..setNavigationDelegate(
@@ -226,6 +250,17 @@ class WebViewScreenState extends State<WebViewScreen> {
           var style = document.createElement('style');
           style.textContent = 'header.site-nav, .site-nav { display: none !important; }';
           document.head.appendChild(style);
+
+          // 로그인 상태 감지 - "계정" 링크 href 기반 (서버 렌더링)
+          (function detectLogin() {
+            var el = document.querySelector('a[aria-label="계정"]');
+            if (el && typeof AppLoginBridge !== 'undefined') {
+              var href = el.getAttribute('href') || '';
+              AppLoginBridge.postMessage(
+                href.indexOf('/settings') === 0 ? 'logged_in' : 'logged_out'
+              );
+            }
+          })();
 
           var _prStartY = 0, _prActive = false;
 
