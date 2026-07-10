@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/fcm_service.dart';
+import 'webview_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -157,6 +158,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   }
                   : null,
+        ),
+        ListTile(
+          title: const Text('계정설정'),
+          leading: const Icon(Icons.manage_accounts_outlined),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const WebViewScreen(
+                  initialUrl: 'https://apaind.mycafe24.com/settings?apartment_id=1',
+                  showAppBar: true,
+                  title: '계정설정',
+                ),
+              ),
+            );
+          },
         ),
         const Divider(height: 24),
         ListTile(

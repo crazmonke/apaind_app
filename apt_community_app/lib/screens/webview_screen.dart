@@ -127,6 +127,14 @@ class WebViewScreenState extends State<WebViewScreen> {
     final WebViewController controller =
         WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..addJavaScriptChannel(
+            'AppRefreshBridge',
+            onMessageReceived: (JavaScriptMessage message) {
+              if (message.message == 'refresh' && mounted) {
+                _reload();
+              }
+            },
+          )
           ..setNavigationDelegate(
             NavigationDelegate(
               onPageStarted: (_) {
@@ -166,6 +174,7 @@ class WebViewScreenState extends State<WebViewScreen> {
                 });
                 _logPageSnapshot();
                 _captureAuthTokenIfPresent();
+                _injectAppBehaviors();
               },
               onWebResourceError: (WebResourceError error) {
                 if (!mounted) return;
@@ -193,6 +202,36 @@ class WebViewScreenState extends State<WebViewScreen> {
           ..loadRequest(initialUri);
 
     return controller;
+  }
+
+  Future<void> _injectAppBehaviors() async {
+    try {
+      await _controller.runJavaScript(r'''
+        (function() {
+          if (window._appBehaviorsInjected) return;
+          window._appBehaviorsInjected = true;
+
+          var style = document.createElement('style');
+          style.textContent = 'header.site-nav, .site-nav { display: none !important; }';
+          document.head.appendChild(style);
+
+          var _prStartY = 0, _prActive = false;
+          document.addEventListener('touchstart', function(e) {
+            _prStartY = e.touches[0].clientY;
+            _prActive = (window.scrollY <= 0);
+          }, {passive: true});
+          document.addEventListener('touchmove', function(e) {
+            if (!_prActive) return;
+            if (e.touches[0].clientY - _prStartY > 80) {
+              _prActive = false;
+              if (typeof AppRefreshBridge !== 'undefined') {
+                AppRefreshBridge.postMessage('refresh');
+              }
+            }
+          }, {passive: true});
+        })();
+      ''');
+    } catch (_) {}
   }
 
   Future<void> _logPageSnapshot() async {

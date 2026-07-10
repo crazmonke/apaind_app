@@ -28,7 +28,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
 
   late final Uri _baseUri = Uri.parse(kBaseWebUrl);
   late String _homeUrl = kBaseWebUrl;
-  late String _communityUrl = _baseUri.resolve('/board').toString();
+  late String _communityUrl = _baseUri.resolve('/community?apartment_id=1').toString();
   late String _notificationUrl = _baseUri.resolve('/notifications').toString();
 
   int _currentIndex = 0;
@@ -108,7 +108,8 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       return 2;
     }
 
-    if (path.startsWith('/board') ||
+    if (path.startsWith('/community') ||
+        path.startsWith('/board') ||
         path.startsWith('/posts') ||
         path.startsWith('/post')) {
       return 1;
@@ -155,7 +156,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_titleByTabIndex(_currentIndex))),
+      appBar: _currentIndex == 3 ? AppBar(title: const Text('설정')) : null,
       body: IndexedStack(
         index: _currentIndex,
         children: <Widget>[
@@ -201,20 +202,5 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
         ],
       ),
     );
-  }
-
-  String _titleByTabIndex(int index) {
-    switch (index) {
-      case 0:
-        return '홈';
-      case 1:
-        return '커뮤니티';
-      case 2:
-        return '알림';
-      case 3:
-        return '설정';
-      default:
-        return '아파인드';
-    }
   }
 }
