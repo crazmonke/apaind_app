@@ -25,6 +25,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       GlobalKey<WebViewScreenState>();
   final GlobalKey<WebViewScreenState> _notificationKey =
       GlobalKey<WebViewScreenState>();
+  final ValueNotifier<int> _settingsRefreshTick = ValueNotifier<int>(0);
 
   late final Uri _baseUri = Uri.parse(kBaseWebUrl);
   late String _homeUrl = kBaseWebUrl;
@@ -43,6 +44,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   @override
   void dispose() {
     widget.pendingOpenUrl.removeListener(_handlePendingUrl);
+    _settingsRefreshTick.dispose();
     super.dispose();
   }
 
@@ -176,6 +178,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
             SettingsScreen(
               onOpenUrl: _openFromSettings,
               onClearWebCache: _clearCurrentWebCache,
+              refreshTick: _settingsRefreshTick,
             ),
           ],
         ),
@@ -187,6 +190,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           setState(() {
             _currentIndex = index;
           });
+          if (index == 3) _settingsRefreshTick.value++;
         },
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: '홈'),
