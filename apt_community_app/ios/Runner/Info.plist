@@ -42,6 +42,8 @@
 		<string>_dartobservatory._tcp</string>
 		<string>_flutterobservatory._tcp</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>공동주택 입주 인증을 위해 현재 위치 정보가 필요합니다.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>게시글 작성 시 사진 촬영을 위해 카메라 권한이 필요합니다.</string>
 	<key>NSLocalNetworkUsageDescription</key>

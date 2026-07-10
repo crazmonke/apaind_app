@@ -129,6 +129,9 @@ class WebViewScreenState extends State<WebViewScreen> {
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
           ..setNavigationDelegate(
             NavigationDelegate(
+              onPermissionRequest: (WebViewPermissionRequest request) {
+                request.grant();
+              },
               onPageStarted: (_) {
                 if (!mounted) return;
                 _loadCycle += 1;
