@@ -157,25 +157,28 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _currentIndex == 3 ? AppBar(title: const Text('설정')) : null,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: <Widget>[
-          WebViewScreen(key: _homeKey, initialUrl: _homeUrl, showAppBar: false),
-          WebViewScreen(
-            key: _communityKey,
-            initialUrl: _communityUrl,
-            showAppBar: false,
-          ),
-          WebViewScreen(
-            key: _notificationKey,
-            initialUrl: _notificationUrl,
-            showAppBar: false,
-          ),
-          SettingsScreen(
-            onOpenUrl: _openFromSettings,
-            onClearWebCache: _clearCurrentWebCache,
-          ),
-        ],
+      body: SafeArea(
+        bottom: false,
+        child: IndexedStack(
+          index: _currentIndex,
+          children: <Widget>[
+            WebViewScreen(key: _homeKey, initialUrl: _homeUrl, showAppBar: false),
+            WebViewScreen(
+              key: _communityKey,
+              initialUrl: _communityUrl,
+              showAppBar: false,
+            ),
+            WebViewScreen(
+              key: _notificationKey,
+              initialUrl: _notificationUrl,
+              showAppBar: false,
+            ),
+            SettingsScreen(
+              onOpenUrl: _openFromSettings,
+              onClearWebCache: _clearCurrentWebCache,
+            ),
+          ],
+        ),
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,

@@ -26,6 +26,9 @@ class WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _isSlowLoading = false;
+  bool _isInitialLoad = true;
+  bool _isPullRefreshing = false;
+  double _pullProgress = 0.0;
   String? _errorMessage;
   late String _currentUrl;
   int _loadCycle = 0;
@@ -37,6 +40,7 @@ class WebViewScreenState extends State<WebViewScreen> {
     if (parsedInitial == null || !parsedInitial.hasScheme) {
       _currentUrl = widget.initialUrl;
       _isLoading = false;
+      _isInitialLoad = false;
       _errorMessage = '잘못된 초기 주소입니다.\n앱 설정을 확인해 주세요.';
     } else {
       _currentUrl = parsedInitial.toString();
@@ -47,7 +51,6 @@ class WebViewScreenState extends State<WebViewScreen> {
   @override
   void didUpdateWidget(covariant WebViewScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-
     if (oldWidget.initialUrl != widget.initialUrl) {
       openUrl(widget.initialUrl);
     }
@@ -57,17 +60,14 @@ class WebViewScreenState extends State<WebViewScreen> {
     debugPrint('WebView openUrl: $url');
     final Uri? parsed = Uri.tryParse(url);
     if (parsed == null || !parsed.hasScheme) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _currentUrl = url;
         _isLoading = false;
         _isSlowLoading = false;
+        _isInitialLoad = false;
         _errorMessage = '잘못된 주소입니다.\n설정에서 기본 주소를 확인해 주세요.';
       });
-      debugPrint('WebView openUrl ignored (invalid URL): $url');
       return;
     }
 
@@ -81,6 +81,31 @@ class WebViewScreenState extends State<WebViewScreen> {
     await _controller.clearLocalStorage();
   }
 
+  void _handleJsBridge(String message) {
+    if (!mounted) return;
+    if (message == 'refresh') {
+      _pullRefresh();
+    } else if (message == 'cancel') {
+      setState(() => _pullProgress = 0.0);
+    } else if (message.startsWith('pull:')) {
+      final double delta = double.tryParse(message.substring(5)) ?? 0.0;
+      setState(() => _pullProgress = (delta / 80.0).clamp(0.0, 1.0));
+    }
+  }
+
+  Future<void> _pullRefresh() async {
+    final Uri? parsed = Uri.tryParse(_currentUrl);
+    if (parsed == null || !parsed.hasScheme) return;
+
+    setState(() {
+      _isPullRefreshing = true;
+      _pullProgress = 0.0;
+      _errorMessage = null;
+    });
+
+    await _controller.loadRequest(parsed);
+  }
+
   Future<void> _captureAuthTokenIfPresent() async {
     try {
       final Object result = await _controller.runJavaScriptReturningResult(
@@ -88,37 +113,24 @@ class WebViewScreenState extends State<WebViewScreen> {
       );
 
       final String? token = _normalizeJavaScriptString(result);
-      if (token == null || token.isEmpty) {
-        return;
-      }
+      if (token == null || token.isEmpty) return;
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final String? currentToken = prefs.getString('auth_token');
-      if (currentToken == token) {
-        return;
-      }
+      if (currentToken == token) return;
 
       await prefs.setString('auth_token', token);
       await FcmService.instance.syncCurrentDeviceRegistration();
-    } catch (_) {
-      // 로그인 상태를 읽을 수 없으면 조용히 무시한다.
-    }
+    } catch (_) {}
   }
 
   String? _normalizeJavaScriptString(Object? result) {
-    if (result == null) {
-      return null;
-    }
-
+    if (result == null) return null;
     final String raw = result.toString();
-    if (raw == 'null' || raw == 'undefined') {
-      return null;
-    }
-
+    if (raw == 'null' || raw == 'undefined') return null;
     if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
       return raw.substring(1, raw.length - 1);
     }
-
     return raw;
   }
 
@@ -130,9 +142,7 @@ class WebViewScreenState extends State<WebViewScreen> {
           ..addJavaScriptChannel(
             'AppRefreshBridge',
             onMessageReceived: (JavaScriptMessage message) {
-              if (message.message == 'refresh' && mounted) {
-                _reload();
-              }
+              _handleJsBridge(message.message);
             },
           )
           ..setNavigationDelegate(
@@ -149,18 +159,9 @@ class WebViewScreenState extends State<WebViewScreen> {
                 });
 
                 Future<void>.delayed(const Duration(seconds: 12), () {
-                  if (!mounted) {
-                    return;
-                  }
-
-                  if (_loadCycle != thisCycle) {
-                    return;
-                  }
-
+                  if (!mounted || _loadCycle != thisCycle) return;
                   if (_isLoading && _errorMessage == null) {
-                    setState(() {
-                      _isSlowLoading = true;
-                    });
+                    setState(() => _isSlowLoading = true);
                     debugPrint('WebView slow loading detected: $_currentUrl');
                   }
                 });
@@ -171,6 +172,8 @@ class WebViewScreenState extends State<WebViewScreen> {
                 setState(() {
                   _isLoading = false;
                   _isSlowLoading = false;
+                  _isPullRefreshing = false;
+                  if (_isInitialLoad) _isInitialLoad = false;
                 });
                 _logPageSnapshot();
                 _captureAuthTokenIfPresent();
@@ -179,9 +182,7 @@ class WebViewScreenState extends State<WebViewScreen> {
               onWebResourceError: (WebResourceError error) {
                 if (!mounted) return;
                 final bool isMainFrame = error.isForMainFrame ?? true;
-                if (!isMainFrame) {
-                  return;
-                }
+                if (!isMainFrame) return;
 
                 debugPrint(
                   'WebView onWebResourceError: '
@@ -194,6 +195,9 @@ class WebViewScreenState extends State<WebViewScreen> {
                 setState(() {
                   _isLoading = false;
                   _isSlowLoading = false;
+                  _isInitialLoad = false;
+                  _isPullRefreshing = false;
+                  _pullProgress = 0.0;
                   _errorMessage = _toFriendlyError(error);
                 });
               },
@@ -216,16 +220,32 @@ class WebViewScreenState extends State<WebViewScreen> {
           document.head.appendChild(style);
 
           var _prStartY = 0, _prActive = false;
+
           document.addEventListener('touchstart', function(e) {
             _prStartY = e.touches[0].clientY;
             _prActive = (window.scrollY <= 0);
           }, {passive: true});
+
           document.addEventListener('touchmove', function(e) {
             if (!_prActive) return;
-            if (e.touches[0].clientY - _prStartY > 80) {
+            var delta = e.touches[0].clientY - _prStartY;
+            if (delta <= 0) { _prActive = false; return; }
+            if (typeof AppRefreshBridge !== 'undefined') {
+              AppRefreshBridge.postMessage('pull:' + Math.min(delta, 100));
+            }
+            if (delta > 80) {
               _prActive = false;
               if (typeof AppRefreshBridge !== 'undefined') {
                 AppRefreshBridge.postMessage('refresh');
+              }
+            }
+          }, {passive: true});
+
+          document.addEventListener('touchend', function() {
+            if (_prActive) {
+              _prActive = false;
+              if (typeof AppRefreshBridge !== 'undefined') {
+                AppRefreshBridge.postMessage('cancel');
               }
             }
           }, {passive: true});
@@ -260,7 +280,6 @@ class WebViewScreenState extends State<WebViewScreen> {
         error.errorType == WebResourceErrorType.hostLookup) {
       return '네트워크에 연결할 수 없습니다.\n인터넷 연결을 확인해 주세요.';
     }
-
     return '페이지를 불러오는 중 오류가 발생했습니다.\n잠시 후 다시 시도해 주세요.';
   }
 
@@ -269,17 +288,13 @@ class WebViewScreenState extends State<WebViewScreen> {
       await _controller.goBack();
       return false;
     }
-
     return true;
   }
 
   Future<void> _reload() async {
     final Uri? parsed = Uri.tryParse(_currentUrl);
     if (parsed == null || !parsed.hasScheme) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _isSlowLoading = false;
@@ -304,8 +319,25 @@ class WebViewScreenState extends State<WebViewScreen> {
             : Stack(
               children: <Widget>[
                 WebViewWidget(controller: _controller),
-                if (_isLoading)
+                // 초기 로드 또는 당겨서 새로고침 중: 브랜드 스플래시
+                if (_isInitialLoad || _isPullRefreshing)
+                  const _ApaindSplash(),
+                // 일반 페이지 이동 중 로딩 스피너
+                if (_isLoading && !_isInitialLoad && !_isPullRefreshing)
                   const Center(child: CircularProgressIndicator()),
+                // 당기는 중 진행 표시줄
+                if (_pullProgress > 0 && !_isPullRefreshing)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: LinearProgressIndicator(
+                      value: _pullProgress,
+                      minHeight: 3,
+                      backgroundColor: Colors.transparent,
+                      color: const Color(0xFF0f6f67),
+                    ),
+                  ),
                 if (_isSlowLoading)
                   Positioned(
                     left: 12,
@@ -344,20 +376,14 @@ class WebViewScreenState extends State<WebViewScreen> {
       canPop: false,
       onPopInvokedWithResult: (bool didPop, Object? result) async {
         if (didPop) return;
-
         final NavigatorState navigator = Navigator.of(context);
-
         final bool canPopNow = await _handleWillPop();
-        if (canPopNow && mounted) {
-          navigator.pop();
-        }
+        if (canPopNow && mounted) navigator.pop();
       },
       child: body,
     );
 
-    if (!widget.showAppBar) {
-      return content;
-    }
+    if (!widget.showAppBar) return content;
 
     return Scaffold(
       appBar: AppBar(
@@ -371,6 +397,72 @@ class WebViewScreenState extends State<WebViewScreen> {
         ],
       ),
       body: content,
+    );
+  }
+}
+
+class _ApaindSplash extends StatelessWidget {
+  const _ApaindSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.white,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[Color(0xFF2e4fb8), Color(0xFF0f6f67)],
+                ),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x4D104378),
+                    blurRadius: 20,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Text(
+                  'A',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              '아파인드',
+              style: TextStyle(
+                color: Color(0xFF0f6f67),
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 40),
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Color(0xFF0f6f67),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
