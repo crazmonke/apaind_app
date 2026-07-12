@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.example.aptCommunityApp</string>
+	<string>com.apaind.app</string>
 	<key>PROJECT_ID</key>
 	<string>apaind</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:205320099452:ios:0491ae596e2ec4a6b89bf9</string>
+	<string>1:205320099452:ios:e1b0c25bd47337f0b89bf9</string>
 </dict>
 </plist>

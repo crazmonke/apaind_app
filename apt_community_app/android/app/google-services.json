@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:205320099452:android:8df6653ce564c5aab89bf9",
+        "mobilesdk_app_id": "1:205320099452:android:843628f54291619cb89bf9",
         "android_client_info": {
-          "package_name": "com.example.apt_community_app"
+          "package_name": "com.apaind.app"
         }
       },
       "oauth_client": [],

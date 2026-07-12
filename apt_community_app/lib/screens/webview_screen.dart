@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -150,6 +151,53 @@ class WebViewScreenState extends State<WebViewScreen> {
     } catch (_) {}
   }
 
+  Future<void> _handleAppToken(String token) async {
+    if (token.isEmpty) return;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', token);
+      await FcmService.instance.syncCurrentDeviceRegistration();
+      debugPrint('AppTokenBridge: FCM token sync triggered');
+    } catch (_) {}
+  }
+
+  Future<void> _handleGeoRequest(String message) async {
+    // message format: "get:callbackId"
+    final List<String> parts = message.split(':');
+    if (parts.length < 2) return;
+    final String callbackId = parts[1];
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        await _controller.runJavaScript(
+          "window['_geoError_$callbackId'](1,'Permission denied')",
+        );
+        return;
+      }
+
+      final Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+
+      if (!mounted) return;
+      await _controller.runJavaScript(
+        "window['_geoCallback_$callbackId'](${position.latitude},${position.longitude},${position.accuracy})",
+      );
+    } catch (_) {
+      await _controller.runJavaScript(
+        "window['_geoError_$callbackId'](2,'Position unavailable')",
+      );
+    }
+  }
+
   String? _normalizeJavaScriptString(Object? result) {
     if (result == null) return null;
     final String raw = result.toString();
@@ -175,6 +223,18 @@ class WebViewScreenState extends State<WebViewScreen> {
             'AppLoginBridge',
             onMessageReceived: (JavaScriptMessage message) {
               _handleLoginState(message.message);
+            },
+          )
+          ..addJavaScriptChannel(
+            'AppTokenBridge',
+            onMessageReceived: (JavaScriptMessage message) {
+              _handleAppToken(message.message);
+            },
+          )
+          ..addJavaScriptChannel(
+            'AppGeoBridge',
+            onMessageReceived: (JavaScriptMessage message) {
+              _handleGeoRequest(message.message);
             },
           )
           ..setNavigationDelegate(
@@ -254,11 +314,19 @@ class WebViewScreenState extends State<WebViewScreen> {
           // 로그인 상태 감지 - "계정" 링크 href 기반 (서버 렌더링)
           (function detectLogin() {
             var el = document.querySelector('a[aria-label="계정"]');
-            if (el && typeof AppLoginBridge !== 'undefined') {
-              var href = el.getAttribute('href') || '';
-              AppLoginBridge.postMessage(
-                href.indexOf('/settings') === 0 ? 'logged_in' : 'logged_out'
-              );
+            if (!el) return;
+            var href = el.getAttribute('href') || '';
+            var isLoggedIn = href.indexOf('/settings') === 0;
+            if (typeof AppLoginBridge !== 'undefined') {
+              AppLoginBridge.postMessage(isLoggedIn ? 'logged_in' : 'logged_out');
+            }
+            if (isLoggedIn && typeof AppTokenBridge !== 'undefined') {
+              fetch('/api/app-token', {credentials: 'include'})
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(data) {
+                  if (data && data.token) AppTokenBridge.postMessage(data.token);
+                })
+                .catch(function() {});
             }
           })();
 
