@@ -29,7 +29,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
 
   late final Uri _baseUri = Uri.parse(kBaseWebUrl);
   late String _homeUrl = kBaseWebUrl;
-  late String _communityUrl = _baseUri.resolve('/community?apartment_id=1').toString();
+  late String _communityUrl = _baseUri.resolve('/community').toString();
   late String _notificationUrl = _baseUri.resolve('/notifications').toString();
 
   int _currentIndex = 0;
@@ -205,6 +205,10 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           if (index == 0) {
             _homeUrl = kBaseWebUrl;
             _homeKey.currentState?.openUrl(kBaseWebUrl);
+          } else if (index == 1) {
+            final String communityBase = _baseUri.resolve('/community').toString();
+            _communityUrl = communityBase;
+            _communityKey.currentState?.openUrl(communityBase);
           } else if (index == 3) {
             _syncAndRefreshSettings();
           }
