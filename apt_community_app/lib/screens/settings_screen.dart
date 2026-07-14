@@ -208,12 +208,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ListTile(
           title: const Text('개인정보처리방침'),
           leading: const Icon(Icons.privacy_tip_outlined),
-          onTap: () => widget.onOpenUrl('/privacy'),
+          onTap: () => widget.onOpenUrl('https://apaind.mycafe24.com/community/posts/13'),
         ),
         ListTile(
           title: const Text('이용약관'),
           leading: const Icon(Icons.description_outlined),
-          onTap: () => widget.onOpenUrl('/terms'),
+          onTap: () => widget.onOpenUrl('https://apaind.mycafe24.com/community/posts/14'),
         ),
         const SizedBox(height: 8),
         if (_isLoggedIn)
