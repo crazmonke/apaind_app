@@ -202,7 +202,12 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           setState(() {
             _currentIndex = index;
           });
-          if (index == 3) _syncAndRefreshSettings();
+          if (index == 0) {
+            _homeUrl = kBaseWebUrl;
+            _homeKey.currentState?.openUrl(kBaseWebUrl);
+          } else if (index == 3) {
+            _syncAndRefreshSettings();
+          }
         },
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: '홈'),
