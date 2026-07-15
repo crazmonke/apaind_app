@@ -13,11 +13,13 @@ class WebViewScreen extends StatefulWidget {
     required this.initialUrl,
     this.showAppBar = true,
     this.title = '아파인드',
+    this.onOpenUrl,
   });
 
   final String initialUrl;
   final bool showAppBar;
   final String title;
+  final void Function(String url)? onOpenUrl;
 
   @override
   State<WebViewScreen> createState() => WebViewScreenState();
@@ -198,6 +200,10 @@ class WebViewScreenState extends State<WebViewScreen> {
     }
   }
 
+  void _handleNavigation(String url) {
+    widget.onOpenUrl?.call(url);
+  }
+
   String? _normalizeJavaScriptString(Object? result) {
     if (result == null) return null;
     final String raw = result.toString();
@@ -235,6 +241,12 @@ class WebViewScreenState extends State<WebViewScreen> {
             'AppGeoBridge',
             onMessageReceived: (JavaScriptMessage message) {
               _handleGeoRequest(message.message);
+            },
+          )
+          ..addJavaScriptChannel(
+            'AppNavigationBridge',
+            onMessageReceived: (JavaScriptMessage message) {
+              _handleNavigation(message.message);
             },
           )
           ..setNavigationDelegate(
@@ -360,6 +372,23 @@ class WebViewScreenState extends State<WebViewScreen> {
               }
             }
           }, {passive: true});
+
+          // 알림 페이지에서 링크 클릭 시 탭 라우팅
+          if (window.location.pathname.startsWith('/notifications')) {
+            document.addEventListener('click', function(e) {
+              var a = e.target.closest('a[href]');
+              if (!a) return;
+              var href = a.getAttribute('href');
+              if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) return;
+              try {
+                var fullUrl = new URL(href, window.location.href).href;
+                if (typeof AppNavigationBridge !== 'undefined') {
+                  e.preventDefault();
+                  AppNavigationBridge.postMessage(fullUrl);
+                }
+              } catch(err) {}
+            }, true);
+          }
         })();
       ''');
     } catch (_) {}

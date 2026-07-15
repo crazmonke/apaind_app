@@ -176,16 +176,18 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
         child: IndexedStack(
           index: _currentIndex,
           children: <Widget>[
-            WebViewScreen(key: _homeKey, initialUrl: _homeUrl, showAppBar: false),
+            WebViewScreen(key: _homeKey, initialUrl: _homeUrl, showAppBar: false, onOpenUrl: _applyTargetUrl),
             WebViewScreen(
               key: _communityKey,
               initialUrl: _communityUrl,
               showAppBar: false,
+              onOpenUrl: _applyTargetUrl,
             ),
             WebViewScreen(
               key: _notificationKey,
               initialUrl: _notificationUrl,
               showAppBar: false,
+              onOpenUrl: _applyTargetUrl,
             ),
             SettingsScreen(
               onOpenUrl: _openFromSettings,
@@ -209,6 +211,10 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
             final String communityBase = _baseUri.resolve('/community').toString();
             _communityUrl = communityBase;
             _communityKey.currentState?.openUrl(communityBase);
+          } else if (index == 2) {
+            final String notifBase = _baseUri.resolve('/notifications').toString();
+            _notificationUrl = notifBase;
+            _notificationKey.currentState?.openUrl(notifBase);
           } else if (index == 3) {
             _syncAndRefreshSettings();
           }
