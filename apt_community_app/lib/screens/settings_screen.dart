@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -37,6 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _noticeEnabled = true;
   bool _eventEnabled = true;
   String _appVersion = '-';
+  String _fcmToken = '-';
 
   @override
   void initState() {
@@ -64,6 +69,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isLoggedIn = prefs.getBool('is_web_logged_in') ?? false;
       _isLoading = false;
     });
+
+    try {
+      final cached = prefs.getString('fcm.last.token');
+      if (cached != null && cached.isNotEmpty && mounted) {
+        setState(() => _fcmToken = cached);
+      }
+      final token = await _fetchFcmToken();
+      if (mounted) setState(() => _fcmToken = token);
+    } catch (e) {
+      if (mounted) setState(() => _fcmToken = '오류: $e');
+    }
   }
 
   Future<void> _refreshLoginState() async {
@@ -74,8 +90,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  Future<void> _saveBool(String key, bool value) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+  // iOS에서 APNS 토큰이 준비될 때까지 최대 10초 대기 후 FCM 토큰 반환
+  Future<String> _fetchFcmToken() async {
+    final messaging = FirebaseMessaging.instance;
+
+    // 알림 권한 상태 확인
+    final settings = await messaging.getNotificationSettings();
+    final authStatus = settings.authorizationStatus;
+    if (authStatus != AuthorizationStatus.authorized &&
+        authStatus != AuthorizationStatus.provisional) {
+      return '알림 권한 없음 (status: $authStatus)';
+    }
+
+    if (Platform.isIOS) {
+      String? apnsToken;
+      for (int i = 0; i < 15; i++) {
+        try {
+          apnsToken = await messaging.getAPNSToken();
+        } catch (e) {
+          if (i == 14) return 'APNS 오류: $e';
+        }
+        if (apnsToken != null && apnsToken.isNotEmpty) break;
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      if (apnsToken == null || apnsToken.isEmpty) {
+        return 'APNS 토큰 없음 (15초 대기 후에도 미발급)';
+      }
+    }
+
+    final token = await messaging.getToken();
+    return token ?? 'FCM 토큰 없음';
+  }
+
+  Future<void> _saveBool(String key, bool value) async {    final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
   }
 
@@ -199,6 +246,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: const Text('앱 버전'),
           subtitle: Text(_appVersion),
           leading: const Icon(Icons.info_outline),
+        ),
+        ListTile(
+          title: const Text('FCM 토큰 복사'),
+          subtitle: Text(
+            _fcmToken,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          leading: const Icon(Icons.copy_outlined),
+          trailing: IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              setState(() => _fcmToken = '로딩 중...');
+              try {
+                final token = await _fetchFcmToken();
+                if (mounted) setState(() => _fcmToken = token);
+              } catch (e) {
+                if (mounted) setState(() => _fcmToken = '오류: $e');
+              }
+            },
+          ),
+          onTap: () {
+            if (_fcmToken == '-' || _fcmToken == '토큰 없음' || _fcmToken == '로딩 중...') return;
+            Clipboard.setData(ClipboardData(text: _fcmToken));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('FCM 토큰이 복사되었습니다.')),
+            );
+          },
         ),
         ListTile(
           title: const Text('앱 캐시 초기화'),
