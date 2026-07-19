@@ -34,6 +34,7 @@ class WebViewScreenState extends State<WebViewScreen> {
   double _pullProgress = 0.0;
   String? _errorMessage;
   late String _currentUrl;
+  String? _lastRecoveredNotFoundUrl;
   int _loadCycle = 0;
 
   @override
@@ -261,6 +262,44 @@ class WebViewScreenState extends State<WebViewScreen> {
     return confirmed ?? false;
   }
 
+  bool _isPostDetailPath(Uri uri) {
+    final String path = uri.path.toLowerCase();
+    return path.startsWith('/posts/') || path.startsWith('/post/');
+  }
+
+  Future<void> _recoverFromDeletedPostNotFound(Uri? targetUri) async {
+    final Uri? effectiveUri = targetUri ?? Uri.tryParse(_currentUrl);
+    if (effectiveUri == null || !_isPostDetailPath(effectiveUri)) {
+      return;
+    }
+
+    final String marker = effectiveUri.toString();
+    if (_lastRecoveredNotFoundUrl == marker) {
+      return;
+    }
+    _lastRecoveredNotFoundUrl = marker;
+
+    final bool canGoBack = await _controller.canGoBack();
+    if (canGoBack) {
+      await _controller.goBack();
+      return;
+    }
+
+    if (widget.onOpenUrl != null) {
+      widget.onOpenUrl!('/community');
+      return;
+    }
+
+    final Uri? currentUri = Uri.tryParse(_currentUrl);
+    if (currentUri == null || !currentUri.hasScheme) {
+      return;
+    }
+
+    await _controller.loadRequest(
+      currentUri.replace(path: '/community', query: null, fragment: null),
+    );
+  }
+
   WebViewController _buildController(String initialUrl) {
     final Uri initialUri = Uri.tryParse(initialUrl) ?? Uri.parse('about:blank');
     final WebViewController controller =
@@ -300,8 +339,10 @@ class WebViewScreenState extends State<WebViewScreen> {
           )
           ..setNavigationDelegate(
             NavigationDelegate(
-              onPageStarted: (_) {
+              onPageStarted: (String url) {
                 if (!mounted) return;
+                _currentUrl = url;
+                _lastRecoveredNotFoundUrl = null;
                 _loadCycle += 1;
                 final int thisCycle = _loadCycle;
                 debugPrint('WebView onPageStarted: $_currentUrl');
@@ -353,6 +394,18 @@ class WebViewScreenState extends State<WebViewScreen> {
                   _pullProgress = 0.0;
                   _errorMessage = _toFriendlyError(error);
                 });
+              },
+              onHttpError: (HttpResponseError error) {
+                final int? statusCode = error.response?.statusCode;
+                final Uri? errorUri = error.response?.uri ?? error.request?.uri;
+                debugPrint(
+                  'WebView onHttpError: '
+                  'statusCode=$statusCode, '
+                  'url=${errorUri ?? _currentUrl}',
+                );
+                if (statusCode == 404) {
+                  _recoverFromDeletedPostNotFound(errorUri);
+                }
               },
             ),
           )
