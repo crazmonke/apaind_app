@@ -214,11 +214,60 @@ class WebViewScreenState extends State<WebViewScreen> {
     return raw;
   }
 
+  Future<void> _showJavaScriptAlertDialog(
+    JavaScriptAlertDialogRequest request,
+  ) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          content: Text(request.message),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('확인'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<bool> _showJavaScriptConfirmDialog(
+    JavaScriptConfirmDialogRequest request,
+  ) async {
+    if (!mounted) return false;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          content: Text(request.message),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('확인'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed ?? false;
+  }
+
   WebViewController _buildController(String initialUrl) {
     final Uri initialUri = Uri.tryParse(initialUrl) ?? Uri.parse('about:blank');
     final WebViewController controller =
         WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..setOnJavaScriptAlertDialog(_showJavaScriptAlertDialog)
+          ..setOnJavaScriptConfirmDialog(_showJavaScriptConfirmDialog)
           ..addJavaScriptChannel(
             'AppRefreshBridge',
             onMessageReceived: (JavaScriptMessage message) {
@@ -460,8 +509,7 @@ class WebViewScreenState extends State<WebViewScreen> {
               children: <Widget>[
                 WebViewWidget(controller: _controller),
                 // 초기 로드 또는 당겨서 새로고침 중: 브랜드 스플래시
-                if (_isInitialLoad || _isPullRefreshing)
-                  const _ApaindSplash(),
+                if (_isInitialLoad || _isPullRefreshing) const _ApaindSplash(),
                 // 일반 페이지 이동 중 로딩 스피너
                 if (_isLoading && !_isInitialLoad && !_isPullRefreshing)
                   const Center(child: CircularProgressIndicator()),
