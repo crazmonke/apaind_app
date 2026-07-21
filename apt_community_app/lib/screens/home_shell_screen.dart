@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_config.dart';
+import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'webview_screen.dart';
 
@@ -23,6 +24,8 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       GlobalKey<WebViewScreenState>();
   final GlobalKey<WebViewScreenState> _communityKey =
       GlobalKey<WebViewScreenState>();
+  final GlobalKey<SearchScreenState> _searchKey =
+      GlobalKey<SearchScreenState>();
   final GlobalKey<WebViewScreenState> _notificationKey =
       GlobalKey<WebViewScreenState>();
   final ValueNotifier<int> _settingsRefreshTick = ValueNotifier<int>(0);
@@ -30,6 +33,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   late final Uri _baseUri = Uri.parse(kBaseWebUrl);
   late String _homeUrl = kBaseWebUrl;
   late String _communityUrl = _baseUri.resolve('/community').toString();
+  late String _searchUrl = _baseUri.resolve('/community').toString();
   late String _notificationUrl = _baseUri.resolve('/notifications').toString();
 
   int _currentIndex = 0;
@@ -59,12 +63,21 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
 
   Future<void> _syncAndRefreshSettings() async {
     // 활성 WebView(같은 도메인)의 localStorage에서 auth_token 상태를 SharedPreferences에 동기화
-    final WebViewScreenState? webView =
-        _homeKey.currentState ??
-        _communityKey.currentState ??
-        _notificationKey.currentState;
-    if (webView != null) {
-      await webView.syncAuthToken();
+    switch (_currentIndex) {
+      case 0:
+        await _homeKey.currentState?.syncAuthToken();
+        break;
+      case 1:
+        await _communityKey.currentState?.syncAuthToken();
+        break;
+      case 2:
+        await _searchKey.currentState?.syncAuthToken();
+        break;
+      case 3:
+        await _notificationKey.currentState?.syncAuthToken();
+        break;
+      default:
+        break;
     }
     _settingsRefreshTick.value++;
   }
@@ -82,6 +95,9 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
         await _communityKey.currentState?.clearCache();
         break;
       case 2:
+        await _searchKey.currentState?.clearCache();
+        break;
+      case 3:
         await _notificationKey.currentState?.clearCache();
         break;
       default:
@@ -101,6 +117,8 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       } else if (nextTabIndex == 1) {
         _communityUrl = normalized;
       } else if (nextTabIndex == 2) {
+        _searchUrl = normalized;
+      } else if (nextTabIndex == 3) {
         _notificationUrl = normalized;
       }
     });
@@ -111,6 +129,8 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       } else if (nextTabIndex == 1) {
         _communityKey.currentState?.openUrl(normalized);
       } else if (nextTabIndex == 2) {
+        _searchKey.currentState?.openUrl(normalized);
+      } else if (nextTabIndex == 3) {
         _notificationKey.currentState?.openUrl(normalized);
       }
     }
@@ -119,11 +139,18 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   int _inferTabIndex(Uri uri) {
     final String path = uri.path.toLowerCase();
     if (path.startsWith('/notifications')) {
-      return 2;
+      return 3;
     }
 
-    if (path.startsWith('/community') ||
-        path.startsWith('/board') ||
+    if (path.startsWith('/community')) {
+      final String? query = uri.queryParameters['q'];
+      if (query != null && query.trim().isNotEmpty) {
+        return 2;
+      }
+      return 1;
+    }
+
+    if (path.startsWith('/board') ||
         path.startsWith('/posts') ||
         path.startsWith('/post')) {
       return 1;
@@ -170,17 +197,27 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: _currentIndex == 3 ? AppBar(title: const Text('설정')) : null,
+      appBar: _currentIndex == 4 ? AppBar(title: const Text('설정')) : null,
       body: SafeArea(
         bottom: false,
         child: IndexedStack(
           index: _currentIndex,
           children: <Widget>[
-            WebViewScreen(key: _homeKey, initialUrl: _homeUrl, showAppBar: false, onOpenUrl: _applyTargetUrl),
+            WebViewScreen(
+              key: _homeKey,
+              initialUrl: _homeUrl,
+              showAppBar: false,
+              onOpenUrl: _applyTargetUrl,
+            ),
             WebViewScreen(
               key: _communityKey,
               initialUrl: _communityUrl,
               showAppBar: false,
+              onOpenUrl: _applyTargetUrl,
+            ),
+            SearchScreen(
+              key: _searchKey,
+              initialUrl: _searchUrl,
               onOpenUrl: _applyTargetUrl,
             ),
             WebViewScreen(
@@ -208,14 +245,16 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
             _homeUrl = kBaseWebUrl;
             _homeKey.currentState?.openUrl(kBaseWebUrl);
           } else if (index == 1) {
-            final String communityBase = _baseUri.resolve('/community').toString();
+            final String communityBase =
+                _baseUri.resolve('/community').toString();
             _communityUrl = communityBase;
             _communityKey.currentState?.openUrl(communityBase);
-          } else if (index == 2) {
-            final String notifBase = _baseUri.resolve('/notifications').toString();
+          } else if (index == 3) {
+            final String notifBase =
+                _baseUri.resolve('/notifications').toString();
             _notificationUrl = notifBase;
             _notificationKey.currentState?.openUrl(notifBase);
-          } else if (index == 3) {
+          } else if (index == 4) {
             _syncAndRefreshSettings();
           }
         },
@@ -224,6 +263,10 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.forum_outlined),
             label: '커뮤니티',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.search_outlined),
+            label: '검색',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.notifications_outlined),
