@@ -597,6 +597,8 @@ class FcmService {
     final String? notificationType =
         data['type']?.toString() ?? data['notificationType']?.toString();
     final String? postId = data['post_id']?.toString();
+    final String? conversationId =
+        data['conversation_id']?.toString() ?? data['sender_id']?.toString();
     final String? rawUrl =
         data['url']?.toString() ??
         data['deep_link']?.toString() ??
@@ -605,6 +607,7 @@ class FcmService {
     final String? routedUrl = _buildRoutedUrl(
       notificationType: notificationType,
       postId: postId,
+      conversationId: conversationId,
       fallbackBaseUrl: fallbackBaseUrl,
     );
 
@@ -632,6 +635,7 @@ class FcmService {
   static String? _buildRoutedUrl({
     required String? notificationType,
     required String? postId,
+    required String? conversationId,
     required String fallbackBaseUrl,
   }) {
     if (notificationType == null || notificationType.isEmpty) {
@@ -639,6 +643,17 @@ class FcmService {
     }
 
     final String normalizedType = notificationType.toLowerCase();
+
+    // 쪽지: 대화 상대 id로 대화 화면 딥링크 (서버 payload: conversation_id/sender_id)
+    if (normalizedType.contains('message')) {
+      if (conversationId == null || conversationId.isEmpty) {
+        return null; // deep_link 폴백에 맡긴다.
+      }
+      return Uri.parse(
+        fallbackBaseUrl,
+      ).resolve('/messages/$conversationId').toString();
+    }
+
     final bool hasPostId = postId != null && postId.isNotEmpty;
     if (!hasPostId) {
       return null;
