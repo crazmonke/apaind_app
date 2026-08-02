@@ -422,7 +422,7 @@ class WebViewScreenState extends State<WebViewScreen> {
           window._appBehaviorsInjected = true;
 
           var style = document.createElement('style');
-          style.textContent = 'header.site-nav, .site-nav { display: none !important; }';
+          style.textContent = 'header.site-nav, .site-nav { display: none !important; } header { height: 0px !important; }';
           document.head.appendChild(style);
 
           // 로그인 상태 감지 - "계정" 링크 href 기반 (서버 렌더링)
