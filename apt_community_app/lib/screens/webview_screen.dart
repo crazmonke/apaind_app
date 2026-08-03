@@ -561,8 +561,8 @@ class WebViewScreenState extends State<WebViewScreen> {
             : Stack(
               children: <Widget>[
                 WebViewWidget(controller: _controller),
-                // 초기 로드 또는 당겨서 새로고침 중: 브랜드 스플래시
-                if (_isInitialLoad || _isPullRefreshing) const _ApaindSplash(),
+                // 초기 로드 중: 브랜드 스플래시
+                if (_isInitialLoad) const _ApaindSplash(),
                 // 일반 페이지 이동 중 로딩 스피너
                 if (_isLoading && !_isInitialLoad && !_isPullRefreshing)
                   const Center(child: CircularProgressIndicator()),
