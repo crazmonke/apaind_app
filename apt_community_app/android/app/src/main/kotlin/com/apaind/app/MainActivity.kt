@@ -1,4 +1,4 @@
-package com.example.apt_community_app
+package com.apaind.app
 
 import io.flutter.embedding.android.FlutterActivity
 

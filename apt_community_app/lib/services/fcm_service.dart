@@ -496,7 +496,7 @@ class FcmService {
     String fallbackBaseUrl,
   ) async {
     const AndroidInitializationSettings androidInitSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('@drawable/ic_notification');
 
     const DarwinInitializationSettings iosInitSettings =
         DarwinInitializationSettings();

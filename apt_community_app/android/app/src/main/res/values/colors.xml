@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 알림 아이콘 배경색 (아파인드 브랜드 컬러) -->
+    <color name="notification_color">#2563EB</color>
+	<color name="ic_launcher_background">#FFFFFF</color>
+</resources>
