@@ -108,6 +108,7 @@ class _AptCommunityAppState extends State<AptCommunityApp>
   Widget build(BuildContext context) {
     return MaterialApp.router(
       title: '아파인드',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
