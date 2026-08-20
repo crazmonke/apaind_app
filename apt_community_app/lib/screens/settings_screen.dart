@@ -264,7 +264,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: const Text('신고 접수 바로가기'),
           subtitle: const Text('부적절 콘텐츠/사용자 신고'),
           leading: const Icon(Icons.flag_outlined),
-          onTap: () => widget.onOpenUrl(kSupportCenterUrl),
+          onTap: () => widget.onOpenUrl(kSupportCenterUrl1),
         ),
         ListTile(
           title: const Text('운영 정책 (24시간 대응)'),
