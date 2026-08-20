@@ -241,8 +241,8 @@ class _SafetyConsentScreenState extends State<_SafetyConsentScreen> {
                 child: const Text(
                   '문의 및 신고 접수\n'
                   '- 앱 내 신고접수: 설정 > 커뮤니티 안전센터\n'
-                  '- 웹 신고접수: /reports/new\n'
-                  '- 이메일: support@apaind.com',
+                  '- 웹 신고접수: https://apaind.mycafe24.com/reports/new\n'
+                  '- 이메일: kysloving@gmail.com',
                   style: TextStyle(height: 1.4),
                 ),
               ),
