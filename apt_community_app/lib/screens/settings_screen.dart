@@ -267,12 +267,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onTap: () => widget.onOpenUrl(kSupportCenterUrl),
         ),
         ListTile(
-          title: const Text('차단/숨김 기능 안내'),
-          subtitle: const Text('게시글 화면 우측 하단 방패 버튼 사용'),
-          leading: const Icon(Icons.block_outlined),
-          onTap: () {},
-        ),
-        ListTile(
           title: const Text('운영 정책 (24시간 대응)'),
           subtitle: const Text('신고된 유해 콘텐츠는 24시간 이내 조치'),
           leading: const Icon(Icons.gavel_outlined),
