@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../app_config.dart';
 import '../services/fcm_service.dart';
 
 class WebViewScreen extends StatefulWidget {
@@ -26,6 +28,9 @@ class WebViewScreen extends StatefulWidget {
 }
 
 class WebViewScreenState extends State<WebViewScreen> {
+  static const String _blockedAuthorKey = 'safety.blocked_authors';
+  static const String _hiddenPostKey = 'safety.hidden_posts';
+
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _isSlowLoading = false;
@@ -36,10 +41,14 @@ class WebViewScreenState extends State<WebViewScreen> {
   late String _currentUrl;
   String? _lastRecoveredNotFoundUrl;
   int _loadCycle = 0;
+  final Set<String> _blockedAuthorKeywords = <String>{};
+  final Set<String> _hiddenPostIds = <String>{};
+  bool _showSafetyActions = false;
 
   @override
   void initState() {
     super.initState();
+    _loadSafetyPreferences();
     final Uri? parsedInitial = Uri.tryParse(widget.initialUrl);
     if (parsedInitial == null || !parsedInitial.hasScheme) {
       _currentUrl = widget.initialUrl;
@@ -50,6 +59,235 @@ class WebViewScreenState extends State<WebViewScreen> {
       _currentUrl = parsedInitial.toString();
     }
     _controller = _buildController(widget.initialUrl);
+  }
+
+  Future<void> _loadSafetyPreferences() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final List<String> blocked =
+        prefs.getStringList(_blockedAuthorKey) ?? const <String>[];
+    final List<String> hidden =
+        prefs.getStringList(_hiddenPostKey) ?? const <String>[];
+    if (!mounted) return;
+    setState(() {
+      _blockedAuthorKeywords
+        ..clear()
+        ..addAll(
+          blocked
+              .map((String value) => value.trim())
+              .where((String value) => value.isNotEmpty),
+        );
+      _hiddenPostIds
+        ..clear()
+        ..addAll(
+          hidden
+              .map((String value) => value.trim())
+              .where((String value) => value.isNotEmpty),
+        );
+    });
+  }
+
+  Future<void> _saveSafetyPreferences() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_blockedAuthorKey, _blockedAuthorKeywords.toList());
+    await prefs.setStringList(_hiddenPostKey, _hiddenPostIds.toList());
+  }
+
+  bool _isCommunityContentUrl(String rawUrl) {
+    final Uri? uri = Uri.tryParse(rawUrl);
+    if (uri == null) return false;
+    final String path = uri.path.toLowerCase();
+    return path.startsWith('/community') ||
+        path.startsWith('/posts/') ||
+        path.startsWith('/post/') ||
+        path.startsWith('/board');
+  }
+
+  String? _extractPostId(String rawUrl) {
+    final Uri? uri = Uri.tryParse(rawUrl);
+    if (uri == null) return null;
+    final RegExpMatch? match = RegExp(r'^/(posts|post)/(\d+)').firstMatch(
+      uri.path.toLowerCase(),
+    );
+    return match?.group(2);
+  }
+
+  Future<void> _applySafetyFilters() async {
+    final List<String> blocked = _blockedAuthorKeywords.toList(growable: false);
+    final List<String> hidden = _hiddenPostIds.toList(growable: false);
+    final String blockedJson = jsonEncode(blocked);
+    final String hiddenJson = jsonEncode(hidden);
+
+    try {
+      await _controller.runJavaScript('''
+        (function() {
+          var blocked = $blockedJson;
+          var hiddenPosts = $hiddenJson;
+
+          function normalize(text) {
+            return (text || '').toString().trim().toLowerCase();
+          }
+
+          function postIdFromHref(href) {
+            if (!href) return null;
+            var m = href.match(/\/(posts|post)\/(\d+)/i);
+            return m ? m[2] : null;
+          }
+
+          function shouldHideByBlockedAuthor(cardText) {
+            var text = normalize(cardText);
+            return blocked.some(function(keyword) {
+              return keyword && text.indexOf(normalize(keyword)) >= 0;
+            });
+          }
+
+          document.querySelectorAll('a[href*="/posts/"]').forEach(function(anchor) {
+            var card = anchor.closest('li, article, .post-item, .post-card, .card');
+            if (!card) return;
+
+            var id = postIdFromHref(anchor.getAttribute('href'));
+            var hideById = id && hiddenPosts.indexOf(id) >= 0;
+            var hideByAuthor = shouldHideByBlockedAuthor(card.innerText || '');
+
+            card.style.display = (hideById || hideByAuthor) ? 'none' : '';
+          });
+        })();
+      ''');
+    } catch (_) {}
+  }
+
+  Future<void> _hideCurrentPostFromFeed() async {
+    final String? postId = _extractPostId(_currentUrl);
+    if (postId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('게시글 화면에서만 사용할 수 있습니다.')));
+      return;
+    }
+
+    _hiddenPostIds.add(postId);
+    await _saveSafetyPreferences();
+    await _applySafetyFilters();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('이 게시글을 피드에서 숨겼습니다.')));
+
+    final Uri? currentUri = Uri.tryParse(_currentUrl);
+    if (currentUri == null || !currentUri.hasScheme) return;
+    await _controller.loadRequest(
+      currentUri.replace(path: '/community', query: null, fragment: null),
+    );
+  }
+
+  Future<void> _promptBlockAuthorKeyword() async {
+    if (!mounted) return;
+    final TextEditingController textController = TextEditingController();
+    final String? keyword = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('사용자/키워드 차단'),
+          content: TextField(
+            controller: textController,
+            decoration: const InputDecoration(
+              hintText: '닉네임 또는 키워드 입력',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(textController.text),
+              child: const Text('차단'),
+            ),
+          ],
+        );
+      },
+    );
+    textController.dispose();
+
+    final String value = (keyword ?? '').trim();
+    if (value.isEmpty) return;
+
+    _blockedAuthorKeywords.add(value);
+    await _saveSafetyPreferences();
+    await _applySafetyFilters();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('"$value" 관련 사용자/콘텐츠를 차단했습니다.')),
+    );
+  }
+
+  Future<void> _openSafetyActionSheet() async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('콘텐츠 신고'),
+                subtitle: const Text('신고 접수 페이지로 이동'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  openUrl(kSupportCenterUrl);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.block_outlined),
+                title: const Text('사용자/키워드 차단'),
+                subtitle: const Text('차단 대상 콘텐츠 즉시 숨김'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _promptBlockAuthorKeyword();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: const Text('현재 글 피드에서 숨기기'),
+                subtitle: const Text('즉시 커뮤니티 목록에서 제거'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _hideCurrentPostFromFeed();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.shield_outlined),
+                title: const Text('안전센터 열기'),
+                subtitle: const Text('정책/문의/신고 안내'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  openUrl(kSupportCenterUrl);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.clear_all_outlined),
+                title: const Text('숨김/차단 해제'),
+                subtitle: const Text('로컬 숨김 및 차단 목록 초기화'),
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  _blockedAuthorKeywords.clear();
+                  _hiddenPostIds.clear();
+                  await _saveSafetyPreferences();
+                  await _applySafetyFilters();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('숨김/차단 목록을 초기화했습니다.')),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -350,6 +588,7 @@ class WebViewScreenState extends State<WebViewScreen> {
                   _isLoading = true;
                   _isSlowLoading = false;
                   _errorMessage = null;
+                  _showSafetyActions = _isCommunityContentUrl(url);
                 });
 
                 Future<void>.delayed(const Duration(seconds: 12), () {
@@ -368,10 +607,12 @@ class WebViewScreenState extends State<WebViewScreen> {
                   _isSlowLoading = false;
                   _isPullRefreshing = false;
                   if (_isInitialLoad) _isInitialLoad = false;
+                  _showSafetyActions = _isCommunityContentUrl(_currentUrl);
                 });
                 _logPageSnapshot();
                 _captureAuthTokenIfPresent();
                 _injectAppBehaviors();
+                _applySafetyFilters();
               },
               onWebResourceError: (WebResourceError error) {
                 if (!mounted) return;
@@ -491,6 +732,59 @@ class WebViewScreenState extends State<WebViewScreen> {
               } catch(err) {}
             }, true);
           }
+
+          // UGC 안전 기능: 신고 버튼을 피드/상세에 직접 노출
+          (function addSafetyButtons() {
+            function createButton(text, href) {
+              var btn = document.createElement('a');
+              btn.className = 'app-safety-inline-btn';
+              btn.href = href;
+              btn.textContent = text;
+              btn.style.marginRight = '6px';
+              btn.style.padding = '4px 8px';
+              btn.style.borderRadius = '999px';
+              btn.style.fontSize = '12px';
+              btn.style.fontWeight = '700';
+              btn.style.background = '#f2f4f7';
+              btn.style.color = '#101828';
+              btn.style.textDecoration = 'none';
+              return btn;
+            }
+
+            document.querySelectorAll('a[href*="/posts/"]').forEach(function(postLink) {
+              var card = postLink.closest('li, article, .post-item, .post-card, .card');
+              if (!card || card.querySelector('.app-safety-inline-wrap')) return;
+
+              var href = postLink.getAttribute('href') || '';
+              var reportHref = '/reports/new?apartment_id=1&content_url=' + encodeURIComponent(href);
+
+              var wrap = document.createElement('div');
+              wrap.className = 'app-safety-inline-wrap';
+              wrap.style.marginTop = '6px';
+
+              var reportBtn = createButton('신고', reportHref);
+              wrap.appendChild(reportBtn);
+              card.appendChild(wrap);
+            });
+
+            if (/^\/posts\/\d+/i.test(window.location.pathname) && !document.querySelector('.app-safety-detail-wrap')) {
+              var reportHref = '/reports/new?apartment_id=1&content_url=' + encodeURIComponent(window.location.pathname);
+              var wrap = document.createElement('div');
+              wrap.className = 'app-safety-detail-wrap';
+              wrap.style.position = 'fixed';
+              wrap.style.right = '14px';
+              wrap.style.bottom = '14px';
+              wrap.style.zIndex = '9999';
+
+              var reportBtn = createButton('이 콘텐츠 신고', reportHref);
+              reportBtn.style.padding = '10px 12px';
+              reportBtn.style.background = '#fee4e2';
+              reportBtn.style.color = '#b42318';
+              reportBtn.style.boxShadow = '0 6px 16px rgba(0,0,0,0.15)';
+              wrap.appendChild(reportBtn);
+              document.body.appendChild(wrap);
+            }
+          })();
         })();
       ''');
     } catch (_) {}
@@ -608,6 +902,17 @@ class WebViewScreenState extends State<WebViewScreen> {
                           ],
                         ),
                       ),
+                    ),
+                  ),
+                if (_showSafetyActions)
+                  Positioned(
+                    right: 14,
+                    bottom: 16,
+                    child: FloatingActionButton.small(
+                      heroTag: 'safety-fab-${widget.hashCode}',
+                      backgroundColor: const Color(0xFFB42318),
+                      onPressed: _openSafetyActionSheet,
+                      child: const Icon(Icons.shield, color: Colors.white),
                     ),
                   ),
               ],

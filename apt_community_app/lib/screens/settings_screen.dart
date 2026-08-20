@@ -122,7 +122,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return token ?? 'FCM 토큰 없음';
   }
 
-  Future<void> _saveBool(String key, bool value) async {    final SharedPreferences prefs = await SharedPreferences.getInstance();
+  Future<void> _saveBool(String key, bool value) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
   }
 
@@ -243,6 +244,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
           },
         ),
         ListTile(
+          title: const Text('커뮤니티 안전센터'),
+          subtitle: const Text('신고/차단/정책/문의 안내'),
+          leading: const Icon(Icons.shield_outlined),
+          onTap: () => widget.onOpenUrl(kSupportCenterUrl),
+        ),
+        ListTile(
+          title: const Text('고객지원 문의 메일'),
+          subtitle: const Text(kSupportEmail),
+          leading: const Icon(Icons.support_agent_outlined),
+          onTap: () {
+            Clipboard.setData(const ClipboardData(text: kSupportEmail));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('지원 메일 주소를 복사했습니다.')),
+            );
+          },
+        ),
+        ListTile(
+          title: const Text('신고 접수 바로가기'),
+          subtitle: const Text('부적절 콘텐츠/사용자 신고'),
+          leading: const Icon(Icons.flag_outlined),
+          onTap: () => widget.onOpenUrl(kSupportCenterUrl),
+        ),
+        ListTile(
+          title: const Text('차단/숨김 기능 안내'),
+          subtitle: const Text('게시글 화면 우측 하단 방패 버튼 사용'),
+          leading: const Icon(Icons.block_outlined),
+          onTap: () {},
+        ),
+        ListTile(
+          title: const Text('운영 정책 (24시간 대응)'),
+          subtitle: const Text('신고된 유해 콘텐츠는 24시간 이내 조치'),
+          leading: const Icon(Icons.gavel_outlined),
+          onTap: () => widget.onOpenUrl(kTermsOfUseUrl),
+        ),
+        ListTile(
           title: const Text('앱 버전'),
           subtitle: Text(_appVersion),
           leading: const Icon(Icons.info_outline),
@@ -283,12 +319,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ListTile(
           title: const Text('개인정보처리방침'),
           leading: const Icon(Icons.privacy_tip_outlined),
-          onTap: () => widget.onOpenUrl('https://apaind.mycafe24.com/community/posts/13'),
+          onTap: () => widget.onOpenUrl(kPrivacyPolicyUrl),
         ),
         ListTile(
           title: const Text('이용약관'),
           leading: const Icon(Icons.description_outlined),
-          onTap: () => widget.onOpenUrl('https://apaind.mycafe24.com/community/posts/14'),
+          onTap: () => widget.onOpenUrl(kTermsOfUseUrl),
         ),
         const SizedBox(height: 8),
         if (_isLoggedIn)
