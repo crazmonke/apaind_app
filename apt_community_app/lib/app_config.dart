@@ -1,6 +1,6 @@
-const String kBaseWebUrl = 'https://apaind.mycafe24.com/';
-const String kSupportCenterUrl = 'https://apaind.mycafe24.com/support';
-const String kSupportCenterUrl1 = 'https://apaind.mycafe24.com/reports/new';
-const String kTermsOfUseUrl = 'https://apaind.mycafe24.com/posts/14';
-const String kPrivacyPolicyUrl = 'https://apaind.mycafe24.com/posts/13';
+const String kBaseWebUrl = 'https://apaind.cloud/';
+const String kSupportCenterUrl = 'https://apaind.cloud/support';
+const String kSupportCenterUrl1 = 'https://apaind.cloud/reports/new';
+const String kTermsOfUseUrl = 'https://apaind.cloud/posts/14';
+const String kPrivacyPolicyUrl = 'https://apaind.cloud/posts/13';
 const String kSupportEmail = 'kysloving@gmail.com';

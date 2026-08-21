@@ -4,7 +4,7 @@
 
 ## 핵심 정보
 
-- 기준 웹 URL: https://apaind.mycafe24.com/
+- 기준 웹 URL: https://apaind.cloud/
 - Android applicationId: com.example.apt_community_app
 - iOS bundle identifier: com.example.aptCommunityApp
 

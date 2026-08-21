@@ -7,7 +7,7 @@
 ## 1. 프로젝트/환경 기준
 
 - 앱 경로: apt_community_app
-- 기준 웹 URL: https://apaind.mycafe24.com/
+- 기준 웹 URL: https://apaind.cloud/
 - OS: macOS
 - Flutter: 3.44.5 (stable)
 - Dart: 3.12.2

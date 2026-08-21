@@ -235,7 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const WebViewScreen(
-                  initialUrl: 'https://apaind.mycafe24.com/settings?apartment_id=1',
+                  initialUrl: 'https://apaind.cloud/settings?apartment_id=1',
                   showAppBar: true,
                   title: '계정설정',
                 ),
